@@ -1,0 +1,41 @@
+{
+  "model_name": "RandomForestClassifier",
+  "data_source": "SYNTHETIC_NER_DEMO_DATA",
+  "metrics": {
+    "accuracy": 0.5792,
+    "precision": 0.6048,
+    "recall": 0.5906,
+    "f1_score": 0.5976,
+    "roc_auc": 0.6247
+  },
+  "feature_importances": {
+    "route_health_score": 0.1481,
+    "rainfall_24h": 0.1465,
+    "slope": 0.1113,
+    "rainfall_1h": 0.1111,
+    "road_condition_score": 0.0893,
+    "elevation": 0.0859,
+    "wind_speed": 0.0766,
+    "distance_to_incident": 0.0675,
+    "incident_severity": 0.0498,
+    "incident_count": 0.0454,
+    "historical_disruptions": 0.0402,
+    "traffic_level": 0.0284
+  },
+  "features": [
+    "rainfall_1h",
+    "rainfall_24h",
+    "wind_speed",
+    "road_condition_score",
+    "traffic_level",
+    "incident_count",
+    "incident_severity",
+    "route_health_score",
+    "elevation",
+    "slope",
+    "historical_disruptions",
+    "distance_to_incident"
+  ],
+  "train_samples": 960,
+  "test_samples": 240
+}
