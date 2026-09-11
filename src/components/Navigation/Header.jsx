@@ -3,11 +3,11 @@ import { Bell, ChevronDown } from 'lucide-react';
 
 export default function Header({ 
   onNavigate, 
-  activeAlertCount = 20,
+  activeAlertCount = 0,
   isOnline = true,
   isSupabaseConnected = true
 }) {
-  const displayAlertCount = activeAlertCount > 0 ? activeAlertCount : 20;
+  const displayAlertCount = activeAlertCount;
 
   return (
     <header className="app-header">
@@ -22,8 +22,8 @@ export default function Header({
             />
           </div>
           <div className="header-title-wrap">
-            <h1 className="header-main-title">Northeast India Logistics Monitoring</h1>
-            <p className="header-subtitle">Safer Routes. Stronger Communities.</p>
+            <h1 className="header-main-title">AapdaSetu</h1>
+            <p className="header-subtitle">Northeast India Logistics Monitoring</p>
           </div>
         </div>
       </div>
@@ -70,7 +70,9 @@ export default function Header({
           id="btn-header-alerts"
         >
           <Bell size={18} />
-          <span className="header-notification-badge">{displayAlertCount}</span>
+          {displayAlertCount > 0 && (
+            <span className="header-notification-badge">{displayAlertCount}</span>
+          )}
         </button>
 
         {/* Admin Profile Section */}

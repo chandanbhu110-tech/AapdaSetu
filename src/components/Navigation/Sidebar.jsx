@@ -15,14 +15,14 @@ import {
 export default function Sidebar({ 
   activePage, 
   setActivePage, 
-  activeAlertCount = 20 
+  activeAlertCount = 0 
 }) {
   const mainNavItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'route-intel', label: 'Route Intelligence', icon: Compass },
     { id: 'live-map', label: 'Live Map', icon: MapIcon },
     { id: 'vehicles', label: 'Vehicles', icon: Truck },
-    { id: 'alerts', label: 'Alerts', icon: Bell, badge: activeAlertCount || 20 },
+    { id: 'alerts', label: 'Alerts', icon: Bell, badge: activeAlertCount > 0 ? activeAlertCount : null },
     { id: 'field-reports', label: 'Field Reports', icon: FileSpreadsheet },
     { id: 'authority', label: 'Analytics', icon: BarChart2 }
   ];
@@ -34,7 +34,7 @@ export default function Sidebar({
         <img 
           src={`${import.meta.env.BASE_URL}aapdassetu-logo.png`} 
           alt="AapdaSetu Logo" 
-          style={{ maxHeight: '42px', width: 'auto', objectFit: 'contain' }}
+          style={{ maxHeight: '100px', width: 'auto', objectFit: 'contain' }}
         />
       </div>
 

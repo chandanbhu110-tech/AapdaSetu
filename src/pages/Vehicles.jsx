@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Truck, 
   CheckCircle, 
@@ -12,19 +12,29 @@ import {
   Navigation, 
   Thermometer 
 } from 'lucide-react';
+import { formatRelativeTime, formatExactDateTime } from '../utils/timeFormat';
+import { vehicleTracker } from '../services/vehicleService';
 
-export default function Vehicles({ vehicles = [], onNavigate = null }) {
+export default function Vehicles({ vehicles = [], onNavigate = null, onAddVehicle = null }) {
   const [activeTab, setActiveTab] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [addedVehicles, setAddedVehicles] = useState([]);
 
-  const allVehiclesList = [...addedVehicles, ...vehicles];
+  // Live timer ticker to keep relative timestamps current
+  const [, setTicker] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTicker(t => t + 1);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const allVehiclesList = vehicles;
 
   // Form state for adding vehicle
   const [newVehicle, setNewVehicle] = useState({
-    id: 'V005',
+    id: 'V007',
     vehicle_number: 'AS-01-BX-4821',
     cargo: 'Medical Supplies',
     priority: 'Critical',
@@ -42,11 +52,11 @@ export default function Vehicles({ vehicles = [], onNavigate = null }) {
     storage_temp_c: 4.2
   });
 
-  // Calculate dynamic counts
-  const totalCount = allVehiclesList.length >= 12 ? allVehiclesList.length : 12;
-  const onRouteCount = allVehiclesList.filter(v => v.status === 'On Route' || v.status === 'Moving').length || 8;
-  const delayedCount = allVehiclesList.filter(v => v.status === 'Delayed').length || 2;
-  const completedCount = 3;
+  // Calculate dynamic counts directly from fleet data
+  const totalCount = allVehiclesList.length;
+  const onRouteCount = allVehiclesList.filter(v => v.status === 'On Route' || v.status === 'Moving').length;
+  const delayedCount = allVehiclesList.filter(v => v.status === 'Delayed').length;
+  const completedCount = allVehiclesList.filter(v => v.status === 'Completed').length;
 
   // Filter logic
   const filteredVehicles = allVehiclesList.filter(v => {
@@ -69,15 +79,29 @@ export default function Vehicles({ vehicles = [], onNavigate = null }) {
     return true;
   });
 
+  const handleOpenAddModal = () => {
+    setNewVehicle(prev => ({
+      ...prev,
+      id: `V00${allVehiclesList.length + 1}`,
+      vehicle_number: `AS-01-BX-${Math.floor(1000 + Math.random() * 9000)}`
+    }));
+    setIsAddModalOpen(true);
+  };
+
   const handleAddVehicleSubmit = (e) => {
     e.preventDefault();
     const created = {
       ...newVehicle,
       id: newVehicle.id || `V00${allVehiclesList.length + 1}`,
       progress_percent: 5,
-      last_update: 'Just now'
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     };
-    setAddedVehicles([created, ...addedVehicles]);
+    if (onAddVehicle) {
+      onAddVehicle(created);
+    } else {
+      vehicleTracker.addVehicle(created);
+    }
     setIsAddModalOpen(false);
   };
 
@@ -130,7 +154,9 @@ export default function Vehicles({ vehicles = [], onNavigate = null }) {
           <div className="ref-kpi-content">
             <span className="ref-kpi-label">Active Vehicles</span>
             <span className="ref-kpi-value">{onRouteCount}</span>
-            <span className="ref-kpi-subtext">On route (67%)</span>
+            <span className="ref-kpi-subtext">
+              On route ({totalCount > 0 ? Math.round((onRouteCount / totalCount) * 100) : 0}%)
+            </span>
           </div>
         </div>
 
@@ -203,7 +229,7 @@ export default function Vehicles({ vehicles = [], onNavigate = null }) {
           </div>
 
           <button
-            onClick={() => setIsAddModalOpen(true)}
+            onClick={handleOpenAddModal}
             className="btn btn-primary"
             style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '0.45rem 0.95rem', fontSize: '0.825rem' }}
           >
@@ -233,16 +259,20 @@ export default function Vehicles({ vehicles = [], onNavigate = null }) {
             <tbody>
               {filteredVehicles.map((v, idx) => {
                 const isDelayed = v.status === 'Delayed';
+                const isCompleted = v.status === 'Completed';
                 const isCritical = v.priority === 'Critical' || v.priority === 'Highest' || v.priority === '1 Highest';
-                const isMedicine = (v.cargo || '').toLowerCase().includes('med');
-                const isFood = (v.cargo || '').toLowerCase().includes('food');
+                const isMedicine = (v.cargo || '').toLowerCase().includes('med') || (v.cargo || '').toLowerCase().includes('blood') || (v.cargo || '').toLowerCase().includes('vaccine');
+                const isFood = (v.cargo || '').toLowerCase().includes('food') || (v.cargo || '').toLowerCase().includes('water');
                 
                 // Sample sub-ID or plate
-                const subId = v.vehicle_number ? `TR-00${(idx % 9) + 1}` : 'TR-001';
+                const subId = v.vehicle_number || `TR-00${(idx % 9) + 1}`;
                 const coordsText = v.current_lat && v.current_lng ? `${Number(v.current_lat).toFixed(4)}, ${Number(v.current_lng).toFixed(4)}` : '26.3520, 92.7006';
-                const speedText = v.speed_kmh ? `${v.speed_kmh} km/h` : '45 km/h';
-                const speedLabel = isDelayed ? 'Slow' : 'Normal';
-                const lastUpdate = idx === 0 ? '2 mins ago' : idx === 1 ? '8 mins ago' : idx === 2 ? '5 mins ago' : `${(idx + 1) * 3} mins ago`;
+                const speedText = v.speed_kmh !== undefined ? `${v.speed_kmh} km/h` : '45 km/h';
+                const speedLabel = isDelayed ? 'Slow' : isCompleted ? 'Halted' : 'Normal';
+                
+                const timestamp = v.updated_at || v.created_at || v.last_ping;
+                const relativeTime = formatRelativeTime(timestamp);
+                const exactTime = formatExactDateTime(timestamp);
 
                 return (
                   <tr key={v.id || idx}>
@@ -253,8 +283,8 @@ export default function Vehicles({ vehicles = [], onNavigate = null }) {
                           width: 28,
                           height: 28,
                           borderRadius: 6,
-                          background: isDelayed ? '#ffedd5' : '#dcfce7',
-                          color: isDelayed ? '#c2410c' : '#15803d',
+                          background: isDelayed ? '#ffedd5' : isCompleted ? '#e0f2fe' : '#dcfce7',
+                          color: isDelayed ? '#c2410c' : isCompleted ? '#0284c7' : '#15803d',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center'
@@ -270,8 +300,8 @@ export default function Vehicles({ vehicles = [], onNavigate = null }) {
 
                     {/* Status Pill */}
                     <td>
-                      <span className={`pill-badge ${isDelayed ? 'pill-orange' : 'pill-green'}`}>
-                        {isDelayed ? 'Delayed' : 'Moving'}
+                      <span className={`pill-badge ${isDelayed ? 'pill-orange' : isCompleted ? 'pill-blue' : 'pill-green'}`}>
+                        {v.status || (isDelayed ? 'Delayed' : 'Moving')}
                       </span>
                     </td>
 
@@ -328,7 +358,12 @@ export default function Vehicles({ vehicles = [], onNavigate = null }) {
 
                     {/* Last Update */}
                     <td>
-                      <span style={{ color: '#64748b', fontSize: '0.78rem' }}>{lastUpdate}</span>
+                      <span 
+                        style={{ color: '#64748b', fontSize: '0.78rem', cursor: 'help' }}
+                        title={exactTime}
+                      >
+                        {relativeTime}
+                      </span>
                     </td>
 
                     {/* Actions */}
@@ -352,6 +387,14 @@ export default function Vehicles({ vehicles = [], onNavigate = null }) {
                   </tr>
                 );
               })}
+
+              {filteredVehicles.length === 0 && (
+                <tr>
+                  <td colSpan={9} style={{ textAlign: 'center', padding: '2.5rem 1rem', color: '#64748b' }}>
+                    No vehicles found matching the selected filter.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -380,7 +423,7 @@ export default function Vehicles({ vehicles = [], onNavigate = null }) {
                     {selectedVehicle.id} • {selectedVehicle.vehicle_number}
                   </h3>
                   <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                    Telemetry Stream • GPS: Simulated
+                    Telemetry Stream • GPS: Simulated • Ping: {formatRelativeTime(selectedVehicle.updated_at || selectedVehicle.created_at || selectedVehicle.last_ping)}
                   </span>
                 </div>
               </div>

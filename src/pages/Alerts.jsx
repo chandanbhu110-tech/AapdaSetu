@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Bell, 
   AlertTriangle, 
@@ -11,6 +11,7 @@ import {
   MapPin, 
   Calendar
 } from 'lucide-react';
+import { formatRelativeTime, formatExactDateTime } from '../utils/timeFormat';
 
 export default function Alerts({ alerts = [], onAcknowledgeAlert = null }) {
   const [activeTab, setActiveTab] = useState('ALL');
@@ -18,94 +19,49 @@ export default function Alerts({ alerts = [], onAcknowledgeAlert = null }) {
   const [severityFilter, setSeverityFilter] = useState('ALL');
   const [selectedAlert, setSelectedAlert] = useState(null);
 
-  // Fallback demo alerts if list is small, to ensure presentation completeness
-  const sampleAlerts = [
-    {
-      alert_id: 'ALT001',
-      severity: 'Critical',
-      title: 'Bridge Impairment',
-      location: 'Jiribam, Manipur',
-      route_id: 'R001 (Guwahati → Imphal)',
-      vehicle_id: 'V001',
-      time: '2 hours ago',
-      status: 'Active',
-      description: 'Critical structural stress detected on Jiribam bridge following flash flooding. High axle-load trucks suspended.',
-      action_required: 'Reroute medicine convoy V001 via Lumding-Silchar valley corridor bypass (+50km).'
-    },
-    {
-      alert_id: 'ALT002',
-      severity: 'High',
-      title: 'Heavy Rainfall Risk',
-      location: 'Sonapur, Assam',
-      route_id: 'R002 (Shillong → Silchar)',
-      vehicle_id: '—',
-      time: '4 hours ago',
-      status: 'Active',
-      description: 'Torrential rainfall exceeding 65mm/hr forecast along NH6 corridor. Reduced visibility and water runoff hazards.',
-      action_required: 'Enforce speed reduction to 30km/h; standby patrol units at vulnerable cuttings.'
-    },
-    {
-      alert_id: 'ALT003',
-      severity: 'High',
-      title: 'Landslide Risk',
-      location: 'Shillong, Meghalaya',
-      route_id: 'R002 (NH6)',
-      vehicle_id: 'V002',
-      time: '6 hours ago',
-      status: 'Active',
-      description: 'Slope saturation reached 82% threshold after 48h persistent monsoonal downpour.',
-      action_required: 'Deploy NHAI earth-moving equipment; halt heavy fuel tankers at Nongpoh checkgate.'
-    },
-    {
-      alert_id: 'ALT004',
-      severity: 'Warning',
-      title: 'Traffic Congestion',
-      location: 'Guwahati, Assam',
-      route_id: 'NH27 Ring Road',
-      vehicle_id: 'V003',
-      time: '1 day ago',
-      status: 'Acknowledged',
-      description: 'Heavy freight bottleneck at Jalukbari interchange due to pavement resurfacing.',
-      action_required: 'Operator acknowledged. Divert outgoing convoys via North Guwahati bypass.'
-    },
-    {
-      alert_id: 'ALT005',
-      severity: 'Resolved',
-      title: 'Route Clearance',
-      location: 'Silchar, Assam',
-      route_id: 'R002 (Silchar Bypass)',
-      vehicle_id: '—',
-      time: '2 days ago',
-      status: 'Resolved',
-      description: 'Fallen trees and rock fragments cleared by Highway Patrol. Pavement cleared for commercial traffic.',
-      action_required: 'All commercial freight lanes reopened. Normal transit protocol restored.'
-    }
-  ];
+  // Live ticker to update relative timestamps every 30 seconds
+  const [, setTicker] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTicker(t => t + 1);
+    }, 30000);
+    return () => clearInterval(timer);
+  }, []);
 
-  // Merge provided dynamic alerts with sample items if needed
-  const combinedAlerts = alerts && alerts.length >= 5 ? alerts.map((a, i) => ({
-    alert_id: a.alert_id || `ALT00${i + 1}`,
-    severity: a.severity || 'Critical',
-    title: a.title || 'Transit Alert',
-    location: a.location || (a.route_id === 'R001' ? 'Jiribam, Manipur' : 'Sonapur, Assam'),
-    route_id: a.route_id || 'NH2 / NH27',
-    vehicle_id: a.vehicle_id || (i === 0 ? 'V001' : '—'),
-    time: a.timestamp ? `${Math.floor((Date.now() - new Date(a.timestamp).getTime()) / 3600000) || 2} hours ago` : `${(i + 1) * 2} hours ago`,
-    status: a.is_acknowledged ? 'Acknowledged' : 'Active',
-    description: a.description || 'Monitored hazard on freight transit corridor.',
-    action_required: a.action_required || 'Follow standard regional emergency protocol.'
-  })) : sampleAlerts;
+  // Directly normalize real alerts from alertService / Supabase
+  const normalizedAlerts = (alerts || []).map((a, i) => {
+    const ts = a.timestamp || a.created_at || new Date().toISOString();
+    const isResolved = a.status === 'Resolved' || a.severity === 'Resolved';
+    const isAck = a.is_acknowledged || a.status === 'Acknowledged' || isResolved;
+    const statusText = isResolved ? 'Resolved' : isAck ? 'Acknowledged' : 'Active';
 
-  // Exact reference counts
-  const criticalCount = 11;
-  const highCount = 5;
-  const warningCount = 3;
-  const acknowledgedCount = 8;
-  const resolvedCount = 12;
-  const totalCount = 39;
+    return {
+      alert_id: a.alert_id || `ALT-${String(i + 1).padStart(3, '0')}`,
+      severity: a.severity || 'Critical',
+      title: a.title || 'Transit Alert',
+      location: a.location || (a.route_id === 'R001' ? 'Jiribam, Manipur' : a.route_id === 'R002' ? 'Sonapur, Assam' : (a.route_id || 'NER Regional Corridor')),
+      route_id: a.route_id || 'NH2 / NH27',
+      vehicle_id: a.vehicle_id || (i === 0 ? 'V001' : '—'),
+      timestamp: ts,
+      time: formatRelativeTime(ts),
+      exact_time: formatExactDateTime(ts),
+      status: statusText,
+      is_acknowledged: isAck,
+      description: a.description || 'Monitored hazard on freight transit corridor.',
+      action_required: a.action_required || 'Follow standard regional emergency protocol.'
+    };
+  });
+
+  // Dynamically derived KPI and Tab counts from actual alerts
+  const totalCount = normalizedAlerts.length;
+  const criticalCount = normalizedAlerts.filter(a => a.severity === 'Critical').length;
+  const highCount = normalizedAlerts.filter(a => a.severity === 'High').length;
+  const warningCount = normalizedAlerts.filter(a => a.severity === 'Warning' || a.severity === 'Moderate').length;
+  const acknowledgedCount = normalizedAlerts.filter(a => a.status === 'Acknowledged').length;
+  const resolvedCount = normalizedAlerts.filter(a => a.status === 'Resolved' || a.severity === 'Resolved').length;
 
   // Filtering
-  const filteredAlerts = combinedAlerts.filter(a => {
+  const filteredAlerts = normalizedAlerts.filter(a => {
     // Tab filter
     if (activeTab === 'CRITICAL' && a.severity !== 'Critical') return false;
     if (activeTab === 'HIGH' && a.severity !== 'High') return false;
@@ -122,7 +78,8 @@ export default function Alerts({ alerts = [], onAcknowledgeAlert = null }) {
       const matchTitle = (a.title || '').toLowerCase().includes(q);
       const matchLoc = (a.location || '').toLowerCase().includes(q);
       const matchVehicle = (a.vehicle_id || '').toLowerCase().includes(q);
-      return matchId || matchTitle || matchLoc || matchVehicle;
+      const matchDesc = (a.description || '').toLowerCase().includes(q);
+      return matchId || matchTitle || matchLoc || matchVehicle || matchDesc;
     }
 
     return true;
@@ -133,7 +90,7 @@ export default function Alerts({ alerts = [], onAcknowledgeAlert = null }) {
       onAcknowledgeAlert(alertId);
     }
     if (selectedAlert && selectedAlert.alert_id === alertId) {
-      setSelectedAlert({ ...selectedAlert, status: 'Acknowledged' });
+      setSelectedAlert({ ...selectedAlert, status: 'Acknowledged', is_acknowledged: true });
     }
   };
 
@@ -315,88 +272,100 @@ export default function Alerts({ alerts = [], onAcknowledgeAlert = null }) {
               </tr>
             </thead>
             <tbody>
-              {filteredAlerts.map((a, idx) => {
-                const isCrit = a.severity === 'Critical';
-                const isHigh = a.severity === 'High';
-                const isWarn = a.severity === 'Warning' || a.severity === 'Moderate';
-                const isResolved = a.status === 'Resolved' || a.severity === 'Resolved';
-                const isAck = a.status === 'Acknowledged';
+              {filteredAlerts.length === 0 ? (
+                <tr>
+                  <td colSpan="8" style={{ textAlign: 'center', padding: '2.5rem 1rem', color: '#64748b' }}>
+                    <Bell size={32} style={{ opacity: 0.4, margin: '0 auto 8px auto', display: 'block' }} />
+                    <strong style={{ display: 'block', fontSize: '0.9rem', color: 'var(--text-primary)' }}>No alerts match the selected filters</strong>
+                    <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                      Try adjusting your search query, severity dropdown, or category tab.
+                    </span>
+                  </td>
+                </tr>
+              ) : (
+                filteredAlerts.map((a, idx) => {
+                  const isCrit = a.severity === 'Critical';
+                  const isHigh = a.severity === 'High';
+                  const isWarn = a.severity === 'Warning' || a.severity === 'Moderate';
+                  const isResolved = a.status === 'Resolved' || a.severity === 'Resolved';
+                  const isAck = a.status === 'Acknowledged';
 
-                return (
-                  <tr key={a.alert_id || idx}>
-                    {/* Alert ID */}
-                    <td>
-                      <strong style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-                        {a.alert_id}
-                      </strong>
-                    </td>
+                  return (
+                    <tr key={a.alert_id || idx}>
+                      {/* Alert ID */}
+                      <td>
+                        <strong style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                          {a.alert_id}
+                        </strong>
+                      </td>
 
-                    {/* Severity */}
-                    <td>
-                      <span className={`pill-badge ${
-                        isCrit ? 'pill-red' : isHigh ? 'pill-orange' : isWarn ? 'pill-yellow' : 'pill-green'
-                      }`}>
-                        {a.severity}
-                      </span>
-                    </td>
+                      {/* Severity */}
+                      <td>
+                        <span className={`pill-badge ${
+                          isCrit ? 'pill-red' : isHigh ? 'pill-orange' : isWarn ? 'pill-yellow' : 'pill-green'
+                        }`}>
+                          {a.severity}
+                        </span>
+                      </td>
 
-                    {/* Alert Title */}
-                    <td>
-                      <strong style={{ color: 'var(--text-primary)' }}>{a.title}</strong>
-                    </td>
+                      {/* Alert Title */}
+                      <td>
+                        <strong style={{ color: 'var(--text-primary)' }}>{a.title}</strong>
+                      </td>
 
-                    {/* Location / Route */}
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <MapPin size={13} color="#0284c7" />
-                        <span>{a.location || a.route_id}</span>
-                      </div>
-                    </td>
+                      {/* Location / Route */}
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <MapPin size={13} color="#0284c7" />
+                          <span>{a.location || a.route_id}</span>
+                        </div>
+                      </td>
 
-                    {/* Affected Vehicle */}
-                    <td>
-                      {a.vehicle_id && a.vehicle_id !== '—' ? (
-                        <span style={{ color: '#0284c7', fontWeight: 600 }}>{a.vehicle_id}</span>
-                      ) : (
-                        <span style={{ color: '#94a3b8' }}>—</span>
-                      )}
-                    </td>
+                      {/* Affected Vehicle */}
+                      <td>
+                        {a.vehicle_id && a.vehicle_id !== '—' ? (
+                          <span style={{ color: '#0284c7', fontWeight: 600 }}>{a.vehicle_id}</span>
+                        ) : (
+                          <span style={{ color: '#94a3b8' }}>—</span>
+                        )}
+                      </td>
 
-                    {/* Time */}
-                    <td>
-                      <span style={{ color: '#64748b', fontSize: '0.8rem' }}>{a.time}</span>
-                    </td>
+                      {/* Time */}
+                      <td title={a.exact_time}>
+                        <span style={{ color: '#64748b', fontSize: '0.8rem', cursor: 'default' }}>{a.time}</span>
+                      </td>
 
-                    {/* Status */}
-                    <td>
-                      <span className={`pill-badge ${
-                        isAck ? 'pill-blue' : isResolved ? 'pill-green' : 'pill-red'
-                      }`}>
-                        {a.status}
-                      </span>
-                    </td>
+                      {/* Status */}
+                      <td>
+                        <span className={`pill-badge ${
+                          isAck ? 'pill-blue' : isResolved ? 'pill-green' : 'pill-red'
+                        }`}>
+                          {a.status}
+                        </span>
+                      </td>
 
-                    {/* Actions */}
-                    <td style={{ textAlign: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                        <button
-                          onClick={() => setSelectedAlert(a)}
-                          className="btn-ref-view"
-                        >
-                          View
-                        </button>
-                        <button
-                          onClick={() => setSelectedAlert(a)}
-                          className="btn-ref-more"
-                          title="Options"
-                        >
-                          <MoreVertical size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+                      {/* Actions */}
+                      <td style={{ textAlign: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          <button
+                            onClick={() => setSelectedAlert(a)}
+                            className="btn-ref-view"
+                          >
+                            View
+                          </button>
+                          <button
+                            onClick={() => setSelectedAlert(a)}
+                            className="btn-ref-more"
+                            title="Options"
+                          >
+                            <MoreVertical size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -425,7 +394,7 @@ export default function Alerts({ alerts = [], onAcknowledgeAlert = null }) {
                     {selectedAlert.alert_id} • {selectedAlert.title}
                   </h3>
                   <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                    {selectedAlert.time} • Status: {selectedAlert.status}
+                    {selectedAlert.time} ({selectedAlert.exact_time}) • Status: {selectedAlert.status}
                   </span>
                 </div>
               </div>

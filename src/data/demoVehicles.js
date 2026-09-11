@@ -4,6 +4,8 @@
  * Optional vehicle V002 (Food Shillong -> Silchar)
  */
 
+const now = Date.now();
+
 export const DEMO_VEHICLES = [
   {
     id: 'V001',
@@ -25,7 +27,9 @@ export const DEMO_VEHICLES = [
     contact: '+91 98640-XXXXX',
     temp_sensitive: true,
     storage_temp_c: 4.2,
-    last_ping: new Date().toLocaleTimeString()
+    last_ping: new Date(now - 2 * 60000).toLocaleTimeString(),
+    created_at: new Date(now - 4 * 3600000).toISOString(),
+    updated_at: new Date(now - 2 * 60000).toISOString()
   },
   {
     id: 'V002',
@@ -47,6 +51,104 @@ export const DEMO_VEHICLES = [
     contact: '+91 94361-XXXXX',
     temp_sensitive: false,
     storage_temp_c: null,
-    last_ping: new Date().toLocaleTimeString()
+    last_ping: new Date(now - 8 * 60000).toLocaleTimeString(),
+    created_at: new Date(now - 6 * 3600000).toISOString(),
+    updated_at: new Date(now - 8 * 60000).toISOString()
+  },
+  {
+    id: 'V003',
+    vehicle_number: 'SK-01-BL-1108',
+    cargo: 'Emergency Blood Plasma & IV Fluids',
+    origin: 'Siliguri',
+    destination: 'Gangtok',
+    route_id: 'R003',
+    priority: 'Critical',
+    status: 'On Route',
+    current_location: 'Ascending Teesta Valley Sector, NH10',
+    current_lat: 27.0500,
+    current_lng: 88.5300,
+    progress_percent: 58.0,
+    speed_kmh: 32,
+    eta_hours: 2.1,
+    gps_mode: 'SIMULATED',
+    driver_name: 'D. Tshering',
+    contact: '+91 97330-XXXXX',
+    temp_sensitive: true,
+    storage_temp_c: 3.8,
+    last_ping: new Date(now - 5 * 60000).toLocaleTimeString(),
+    created_at: new Date(now - 3 * 3600000).toISOString(),
+    updated_at: new Date(now - 5 * 60000).toISOString()
+  },
+  {
+    id: 'V004',
+    vehicle_number: 'AS-03-WT-7762',
+    cargo: 'Water Purification Units & Sanitation Kits',
+    origin: 'Guwahati',
+    destination: 'Tezpur',
+    route_id: 'R001',
+    priority: 'Normal',
+    status: 'Completed',
+    current_location: 'Delivered at Tezpur Flood Relief Depot',
+    current_lat: 26.6528,
+    current_lng: 92.7926,
+    progress_percent: 100,
+    speed_kmh: 0,
+    eta_hours: 0,
+    gps_mode: 'SIMULATED',
+    driver_name: 'P. Saikia',
+    contact: '+91 94350-XXXXX',
+    temp_sensitive: false,
+    storage_temp_c: null,
+    last_ping: new Date(now - 35 * 60000).toLocaleTimeString(),
+    created_at: new Date(now - 8 * 3600000).toISOString(),
+    updated_at: new Date(now - 35 * 60000).toISOString()
+  },
+  {
+    id: 'V005',
+    vehicle_number: 'TR-01-MD-3390',
+    cargo: 'Oxygen Cylinders & Surgical Kits',
+    origin: 'Guwahati',
+    destination: 'Silchar',
+    route_id: 'R002',
+    priority: 'High',
+    status: 'On Route',
+    current_location: 'In transit via Meghalaya Plateau, NH6',
+    current_lat: 25.4500,
+    current_lng: 92.2000,
+    progress_percent: 35.0,
+    speed_kmh: 42,
+    eta_hours: 4.8,
+    gps_mode: 'SIMULATED',
+    driver_name: 'A. Debbarma',
+    contact: '+91 98625-XXXXX',
+    temp_sensitive: false,
+    storage_temp_c: null,
+    last_ping: new Date(now - 12 * 60000).toLocaleTimeString(),
+    created_at: new Date(now - 2 * 3600000).toISOString(),
+    updated_at: new Date(now - 12 * 60000).toISOString()
+  },
+  {
+    id: 'V006',
+    vehicle_number: 'MZ-01-SH-5519',
+    cargo: 'Emergency Shelter Tents & Thermal Blankets',
+    origin: 'Silchar',
+    destination: 'Aizawl',
+    route_id: 'R002',
+    priority: 'Normal',
+    status: 'Completed',
+    current_location: 'Delivered at Aizawl Civil Supply Center',
+    current_lat: 23.7271,
+    current_lng: 92.7176,
+    progress_percent: 100,
+    speed_kmh: 0,
+    eta_hours: 0,
+    gps_mode: 'SIMULATED',
+    driver_name: 'L. Ralte',
+    contact: '+91 94363-XXXXX',
+    temp_sensitive: false,
+    storage_temp_c: null,
+    last_ping: new Date(now - 55 * 60000).toLocaleTimeString(),
+    created_at: new Date(now - 9 * 3600000).toISOString(),
+    updated_at: new Date(now - 55 * 60000).toISOString()
   }
 ];
