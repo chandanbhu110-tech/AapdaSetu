@@ -11,27 +11,58 @@
  * - Enforces UNIQUE alert_id constraint on Supabase table.
  */
 
-import { INITIAL_ALERTS } from '../data/demoAlerts';
-import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { INITIAL_ALERTS } from '../data/demoAlerts.js';
+import { supabase, isSupabaseConfigured } from './supabaseClient.js';
+
+const STORAGE_KEY_ALERTS = 'ner_alerts_cache';
 
 class AlertEngineManager {
   constructor() {
-    this.alerts = [...INITIAL_ALERTS];
     this.subscribers = new Set();
-    this.knownAlertIds = new Set(INITIAL_ALERTS.map(a => a.alert_id));
     this.inFlightAlertIds = new Set();
     this.isEvaluating = false;
 
+    // Load persisted alerts from localStorage or fallback to baseline
+    this.alerts = this.loadStoredAlerts();
+    this.knownAlertIds = new Set(this.alerts.map(a => a.alert_id));
+
     // Sync known existing active alerts from Supabase on init
     this.syncFromSupabase();
+  }
+
+  loadStoredAlerts() {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const stored = localStorage.getItem(STORAGE_KEY_ALERTS);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Could not read cached alerts:', e);
+    }
+    return [...INITIAL_ALERTS];
+  }
+
+  saveState() {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem(STORAGE_KEY_ALERTS, JSON.stringify(this.alerts));
+      }
+    } catch (e) {
+      console.warn('Could not persist alerts state:', e);
+    }
   }
 
   async syncFromSupabase() {
     if (!isSupabaseConfigured || !supabase) return;
 
     try {
-      const { data, error } = await supabase.from('alerts').select('*');
-      if (!error && data) {
+      const { data, error } = await supabase.from('alerts').select('*').order('created_at', { ascending: false });
+      if (!error && data && data.length > 0) {
         data.forEach(dbA => {
           if (dbA.alert_id) {
             this.knownAlertIds.add(dbA.alert_id);
@@ -44,14 +75,17 @@ class AlertEngineManager {
                 severity: dbA.severity || 'High',
                 description: dbA.cause || dbA.title,
                 route_id: dbA.affected_route,
-                vehicle_id: null,
+                location: dbA.location || dbA.affected_route || 'NER Corridor',
+                vehicle_id: dbA.vehicle_id || null,
                 timestamp: dbA.timestamp || dbA.created_at || new Date().toISOString(),
                 is_acknowledged: dbA.status === 'Resolved' || dbA.status === 'Acknowledged',
+                status: dbA.status || (dbA.is_acknowledged ? 'Acknowledged' : 'Active'),
                 action_required: dbA.recommended_action || 'Operational review advised.'
               });
             }
           }
         });
+        this.saveState();
         this.notifySubscribers();
       }
     } catch (err) {
@@ -69,8 +103,9 @@ class AlertEngineManager {
 
   async acknowledgeAlert(alertId) {
     this.alerts = this.alerts.map(a => 
-      a.alert_id === alertId ? { ...a, is_acknowledged: true } : a
+      (a.alert_id === alertId || a.id === alertId) ? { ...a, is_acknowledged: true, status: 'Acknowledged' } : a
     );
+    this.saveState();
     this.notifySubscribers();
 
     // Update status in Supabase if configured
@@ -84,6 +119,7 @@ class AlertEngineManager {
         console.warn('Supabase alert acknowledge update notice:', err);
       }
     }
+    return true;
   }
 
   /**
@@ -212,16 +248,20 @@ class AlertEngineManager {
         }
       }
 
-      // 4. If it does not exist, insert the alert
+      const nowIso = new Date().toISOString();
       const newAlert = {
+        id: targetAlertId,
+        alert_id: targetAlertId,
         ...alertPayload,
-        timestamp: new Date().toISOString(),
+        timestamp: alertPayload.timestamp || nowIso,
+        created_at: alertPayload.created_at || nowIso,
         is_acknowledged: false
       };
 
       // Update in-memory collections
       this.knownAlertIds.add(targetAlertId);
       this.alerts = [newAlert, ...this.alerts];
+      this.saveState();
       this.notifySubscribers();
 
       // Insert into Supabase
@@ -243,11 +283,16 @@ class AlertEngineManager {
           affected_route: newAlert.route_id
         };
 
-        const { error: insertError } = await supabase.from('alerts').insert([dbPayload]);
+        const { data: insertedData, error: insertError } = await supabase.from('alerts').insert([dbPayload]).select();
         if (insertError) {
           // If code is 23505 (unique constraint violation), handle gracefully as idempotent no-op
           if (insertError.code !== '23505') {
             console.warn('Supabase alert insert failed:', insertError);
+          }
+        } else if (insertedData && insertedData.length > 0) {
+          if (insertedData[0].created_at || insertedData[0].timestamp) {
+            newAlert.timestamp = insertedData[0].timestamp || insertedData[0].created_at;
+            this.saveState();
           }
         }
       }
@@ -258,6 +303,14 @@ class AlertEngineManager {
     } finally {
       this.inFlightAlertIds.delete(targetAlertId);
     }
+  }
+
+  async createAlert(alertPayload) {
+    const alertId = alertPayload.alert_id || `ALT-${Date.now().toString().slice(-6)}`;
+    return await this.createAlertIfNotExists({
+      ...alertPayload,
+      alert_id: alertId
+    });
   }
 
   subscribe(callback) {

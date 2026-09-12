@@ -126,6 +126,14 @@ export default function App() {
     return addedReport;
   };
 
+  const handleVerifyFieldReport = async (reportId) => {
+    await incidentService.verifyReport(reportId);
+  };
+
+  const handleAddVehicle = (newVehicle) => {
+    return vehicleTracker.addVehicle(newVehicle);
+  };
+
   const activeAlertsCount = alerts.filter(a => !a.is_acknowledged).length;
 
   return (
@@ -206,6 +214,7 @@ export default function App() {
           {activePage === 'vehicles' && (
             <Vehicles
               vehicles={vehicles}
+              onAddVehicle={handleAddVehicle}
               onNavigate={(page) => setActivePage(page)}
             />
           )}
@@ -221,6 +230,7 @@ export default function App() {
             <FieldReports
               fieldReports={fieldReports}
               onSubmitReport={handleSubmitFieldReport}
+              onVerifyReport={handleVerifyFieldReport}
               routes={routes}
               isOnline={isOnline}
               offlineQueueCount={offlineQueueCount}

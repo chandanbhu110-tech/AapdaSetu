@@ -40,10 +40,10 @@ export default function AuthorityDashboard({
   const criticalRoutesCount = criticalRoutes.length;
 
   // Active unacknowledged alerts
-  const activeAlertsCount = alerts.filter(a => !a.is_acknowledged).length || 11;
+  const activeAlertsCount = alerts.filter(a => !a.is_acknowledged).length;
 
   // Pending field reports
-  const pendingReportsCount = fieldReports.filter(f => f.status === 'Pending Review' || f.status === 'Pending Sync').length || 6;
+  const pendingReportsCount = fieldReports.filter(f => f.status === 'Pending Verification' || f.status === 'Pending Review' || f.status === 'Pending Sync').length;
 
   // High-Risk AI Predictions (prob >= 50% or High/Critical)
   const aiHighRiskCount = Object.values(predictions).filter(p => 
@@ -74,8 +74,8 @@ export default function AuthorityDashboard({
   });
 
   // Delayed vehicles count
-  const delayedVehiclesCount = vehicles.filter(v => v.status === 'Delayed').length || 2;
-  const criticalDeliveriesCount = vehicles.filter(v => v.priority === 'Critical').length || 1;
+  const delayedVehiclesCount = vehicles.filter(v => v.status === 'Delayed').length;
+  const criticalDeliveriesCount = vehicles.filter(v => v.priority === 'Critical').length;
 
   const handleInspectClick = (route) => {
     setInspectRoute(route);

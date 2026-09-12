@@ -17,30 +17,94 @@ const STORAGE_KEY_QUEUE = 'ner_offline_field_reports_queue';
 
 const INITIAL_FIELD_REPORTS = [
   {
-    id: 'FR-101',
+    id: 'FR-001',
+    incident_type: 'Landslide / Mudflow',
+    description: 'Major rock and mudslide blocking eastbound lane near Sonapur cutting.',
+    severity: 'Critical',
+    latitude: 25.0640,
+    longitude: 92.3610,
+    affected_route: 'R002',
+    location_name: 'Sonapur, Assam',
+    reporter_role: 'Field Officer',
+    status: 'Pending Verification',
+    photo_url: null,
+    created_at: new Date(Date.now() - 10 * 60000).toISOString(),
+    is_offline: false
+  },
+  {
+    id: 'FR-002',
+    incident_type: 'Road Blockage',
+    description: 'Bridge approach damaged by rising water levels; light vehicles restricted.',
+    severity: 'High',
+    latitude: 24.7980,
+    longitude: 93.1230,
+    affected_route: 'R001',
+    location_name: 'Jiribam, Manipur',
+    reporter_role: 'Volunteer',
+    status: 'Pending Sync',
+    photo_url: null,
+    created_at: new Date(Date.now() - 65 * 60000).toISOString(),
+    is_offline: true
+  },
+  {
+    id: 'FR-003',
+    incident_type: 'Heavy Rainfall',
+    description: 'Inundation on lower highway stretch; speed reduced to 20 km/h.',
+    severity: 'High',
+    latitude: 24.2250,
+    longitude: 92.6780,
+    affected_route: 'R003',
+    location_name: 'Kolasib, Mizoram',
+    reporter_role: 'Field Officer',
+    status: 'Verified',
+    photo_url: null,
+    created_at: new Date(Date.now() - 180 * 60000).toISOString(),
+    is_offline: false
+  },
+  {
+    id: 'FR-004',
+    incident_type: 'Debris on Road',
+    description: 'Scattered boulders and branches across road following hill storm.',
+    severity: 'Medium',
+    latitude: 24.8330,
+    longitude: 92.7780,
+    affected_route: 'R002',
+    location_name: 'Silchar, Assam',
+    reporter_role: 'Volunteer',
+    status: 'Pending Verification',
+    photo_url: null,
+    created_at: new Date(Date.now() - 300 * 60000).toISOString(),
+    is_offline: false
+  },
+  {
+    id: 'FR-005',
     incident_type: 'Mud Accumulation',
     description: 'Citizen report: 2 feet mud buildup near Nungba curve. Heavy vehicles slipping.',
     severity: 'Moderate',
     latitude: 24.7800,
     longitude: 93.3100,
     affected_route: 'R001',
+    location_name: 'Nungba Corridor, Manipur',
     reporter_role: 'Local Transport Union Driver',
     status: 'Verified',
     photo_url: null,
-    created_at: new Date(Date.now() - 3600000 * 2).toISOString()
+    created_at: new Date(Date.now() - 420 * 60000).toISOString(),
+    is_offline: false
   },
   {
-    id: 'FR-102',
+    id: 'FR-006',
     incident_type: 'Tree Fall & Power Cable Obstruction',
     description: 'Field volunteer report: Heavy eucalyptus branch down over single lane NH6 approach.',
     severity: 'High',
     latitude: 25.2000,
     longitude: 92.3100,
     affected_route: 'R002',
+    location_name: 'Jowai Bypass, Meghalaya',
     reporter_role: 'District Disaster Volunteer',
     status: 'Pending Verification',
     photo_url: null,
-    created_at: new Date(Date.now() - 1800000).toISOString()
+    created_at: new Date(Date.now() - 720 * 60000).toISOString(),
+    is_offline: false
   }
 ];
 
@@ -81,19 +145,22 @@ class IncidentServiceManager {
             latitude: parseFloat(r.latitude) || 25.0,
             longitude: parseFloat(r.longitude) || 92.5,
             affected_route: r.affected_route || 'R001',
-            reporter_role: r.reporter_id || 'Citizen Reporter',
+            location_name: r.location_name || r.location || '',
+            reporter_role: r.reporter_role || r.reporter_id || 'Citizen Reporter',
             status: r.status || 'Pending Verification',
             photo_url: r.photo_url || null,
             created_at: r.created_at || r.timestamp || new Date().toISOString(),
             is_offline: false
           }));
-          const existingIds = new Set(this.fieldReports.map(fr => fr.id));
-          const newRemote = remoteNormalized.filter(r => !existingIds.has(r.id));
-          if (newRemote.length > 0) {
-            this.fieldReports = [...newRemote, ...this.fieldReports];
-            this.saveState();
-            this.notifySubscribers();
-          }
+
+          // Keep un-synced offline reports at the top
+          const offlineReports = this.fieldReports.filter(r => r.status === 'Pending Sync' || r.is_offline);
+          const remoteIds = new Set(remoteNormalized.map(r => r.id));
+          const uniqueOffline = offlineReports.filter(r => !remoteIds.has(r.id));
+
+          this.fieldReports = [...uniqueOffline, ...remoteNormalized];
+          this.saveState();
+          this.notifySubscribers();
         }
       } catch (err) {
         console.warn('Could not fetch remote field reports:', err);
@@ -107,7 +174,11 @@ class IncidentServiceManager {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          return parsed.map(r => ({
+            ...r,
+            location_name: r.location_name || r.location || (r.affected_route === 'R001' ? 'Jiribam, Manipur' : 'Sonapur, Assam'),
+            created_at: r.created_at || new Date().toISOString()
+          }));
         }
       }
     } catch (e) {
@@ -128,7 +199,7 @@ class IncidentServiceManager {
     } catch (e) {
       console.warn('Could not read offline queue:', e);
     }
-    return [];
+    return INITIAL_FIELD_REPORTS.filter(r => r.status === 'Pending Sync' || r.is_offline);
   }
 
   saveState() {
@@ -173,18 +244,20 @@ class IncidentServiceManager {
     const isCurrentlyOnline = this.isOnline();
     const status = isCurrentlyOnline ? 'Pending Verification' : 'Pending Sync';
 
+    const timestamp = new Date().toISOString();
     const newReport = {
-      id: `FR-${Date.now().toString().slice(-4)}`,
+      id: `FR-${Date.now().toString().slice(-5)}`,
       incident_type: reportData.incident_type || 'Road Hazard',
       description: reportData.description || 'Observed route disruption.',
       severity: reportData.severity || 'Moderate',
       latitude: parseFloat(reportData.latitude) || 26.1445,
       longitude: parseFloat(reportData.longitude) || 91.7362,
       affected_route: reportData.affected_route || 'R001',
+      location_name: reportData.location_name || (reportData.affected_route === 'R001' ? 'Jiribam, Manipur' : 'Sonapur, Assam'),
       reporter_role: reportData.reporter_role || 'Field Reporter / Volunteer',
       status: status,
       photo_url: reportData.photo_url || null,
-      created_at: new Date().toISOString(),
+      created_at: timestamp,
       is_offline: !isCurrentlyOnline
     };
 
@@ -208,13 +281,21 @@ class IncidentServiceManager {
           latitude: newReport.latitude,
           longitude: newReport.longitude,
           affected_route: newReport.affected_route,
-          reporter_id: newReport.reporter_role || 'Volunteer',
+          location_name: newReport.location_name,
+          reporter_role: newReport.reporter_role,
+          reporter_id: newReport.reporter_role,
           photo_url: newReport.photo_url || null,
           status: newReport.status
         };
-        const { error } = await supabase.from('field_reports').insert([dbPayload]);
+        const { data, error } = await supabase.from('field_reports').insert([dbPayload]).select();
         if (error) {
           console.warn('Notice: Supabase field_reports table query returned:', error.message);
+        } else if (data && data.length > 0) {
+          const inserted = data[0];
+          newReport.id = inserted.report_id || `FR-${inserted.id}`;
+          if (inserted.created_at) {
+            newReport.created_at = inserted.created_at;
+          }
         }
       } catch (err) {
         console.warn('Supabase insert failed, preserved locally:', err);
@@ -249,6 +330,8 @@ class IncidentServiceManager {
             latitude: report.latitude,
             longitude: report.longitude,
             affected_route: report.affected_route,
+            location_name: report.location_name || '',
+            reporter_role: report.reporter_role || 'Volunteer',
             reporter_id: report.reporter_role || 'Volunteer',
             photo_url: report.photo_url || null,
             status: 'Pending Verification'
@@ -271,6 +354,29 @@ class IncidentServiceManager {
     this.saveState();
     this.notifySubscribers();
     return { syncedCount };
+  }
+
+  /**
+   * Updates report status to 'Verified' and persists
+   */
+  async verifyReport(reportId) {
+    this.fieldReports = this.fieldReports.map(fr => 
+      fr.id === reportId ? { ...fr, status: 'Verified', is_offline: false } : fr
+    );
+    this.saveState();
+    this.notifySubscribers();
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const numericId = parseInt(String(reportId).replace(/\D/g, ''), 10);
+        await supabase
+          .from('field_reports')
+          .update({ status: 'Verified' })
+          .or(`report_id.eq.${reportId},id.eq.${numericId}`);
+      } catch (err) {
+        console.warn('Supabase update notice for verify report:', err);
+      }
+    }
   }
 
   handleNetworkOnline() {

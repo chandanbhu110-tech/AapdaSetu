@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   FileSpreadsheet, 
   FileText, 
@@ -18,9 +18,69 @@ import {
   UploadCloud
 } from 'lucide-react';
 
+// Dynamic relative time formatting helper
+function formatRelativeTime(timestamp) {
+  if (!timestamp) return 'Recently';
+  const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return String(timestamp);
+  
+  const now = Date.now();
+  const diffMs = now - date.getTime();
+  
+  // Handle slight future clock skew or within 45 seconds
+  if (diffMs < 45000) {
+    return 'Just now';
+  }
+  
+  const diffMinutes = Math.floor(diffMs / 60000);
+  if (diffMinutes < 2) {
+    return '1 min ago';
+  }
+  if (diffMinutes < 60) {
+    return `${diffMinutes} mins ago`;
+  }
+  
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours === 1) {
+    return '1 hour ago';
+  }
+  if (diffHours < 24) {
+    return `${diffHours} hours ago`;
+  }
+  
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) {
+    return '1 day ago';
+  }
+  if (diffDays < 7) {
+    return `${diffDays} days ago`;
+  }
+  
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric'
+  });
+}
+
+// Exact date/time formatting helper
+function formatExactDateTime(timestamp) {
+  if (!timestamp) return '';
+  const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return String(timestamp);
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+}
+
 export default function FieldReports({ 
   fieldReports = [], 
   onSubmitReport, 
+  onVerifyReport = null,
   routes = [],
   isOnline = true,
   offlineQueueCount = 0,
@@ -34,6 +94,15 @@ export default function FieldReports({
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [selectedReport, setSelectedReport] = useState(null);
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
+
+  // Periodic ticker to recalculate relative timestamps dynamically
+  const [, setTicker] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTicker(t => t + 1);
+    }, 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Form states
   const [incidentType, setIncidentType] = useState('Landslide / Mudflow');
@@ -49,94 +118,55 @@ export default function FieldReports({
   const [feedbackMsg, setFeedbackMsg] = useState(null);
   const [geoLocating, setGeoLocating] = useState(false);
 
-  // Fallback sample reports to match reference if few exist
-  const sampleReports = [
-    {
-      id: 'FR001',
-      incident_type: 'Landslide / Mudflow',
-      severity: 'Critical',
-      location: 'Sonapur, Assam',
-      affected_route: 'Shillong → Silchar',
-      reporter_role: 'Field Officer',
-      time: '10 mins ago',
-      sync_status: 'Synced',
-      verification_status: 'Pending Verification',
-      description: 'Major rock and mudslide blocking eastbound lane near Sonapur cutting.',
-      latitude: '25.0640',
-      longitude: '92.3610'
-    },
-    {
-      id: 'FR002',
-      incident_type: 'Road Blockage',
-      severity: 'High',
-      location: 'Jiribam, Manipur',
-      affected_route: 'Imphal → Jiribam',
-      reporter_role: 'Volunteer',
-      time: '1 hour ago',
-      sync_status: 'Pending Sync',
-      verification_status: 'Pending Verification',
-      description: 'Bridge approach damaged by rising water levels; light vehicles restricted.',
-      latitude: '24.7980',
-      longitude: '93.1230'
-    },
-    {
-      id: 'FR003',
-      incident_type: 'Heavy Rainfall',
-      severity: 'High',
-      location: 'Kolasib, Mizoram',
-      affected_route: 'Aizawl → Guwahati',
-      reporter_role: 'Field Officer',
-      time: '3 hours ago',
-      sync_status: 'Synced',
-      verification_status: 'Verified',
-      description: 'Inundation on lower highway stretch; speed reduced to 20 km/h.',
-      latitude: '24.2250',
-      longitude: '92.6780'
-    },
-    {
-      id: 'FR004',
-      incident_type: 'Debris on Road',
-      severity: 'Medium',
-      location: 'Silchar, Assam',
-      affected_route: 'Silchar → Haflong',
-      reporter_role: 'Volunteer',
-      time: '5 hours ago',
-      sync_status: 'Synced',
-      verification_status: 'Pending Verification',
-      description: 'Scattered boulders and branches across road following hill storm.',
-      latitude: '24.8330',
-      longitude: '92.7780'
-    }
-  ];
+  const getRouteLabel = (routeId) => {
+    const found = routes.find(r => r.id === routeId);
+    if (found) return `${found.origin} → ${found.destination}`;
+    if (routeId === 'R001') return 'Guwahati → Imphal';
+    if (routeId === 'R002') return 'Shillong → Silchar';
+    if (routeId === 'R003') return 'Silchar → Aizawl';
+    if (routeId === 'R004') return 'Dimapur → Kohima';
+    return routeId || 'NER Corridor';
+  };
 
-  // Combine dynamic reports with reference items
-  const combinedReports = fieldReports && fieldReports.length >= 4 ? fieldReports.map((r, i) => ({
-    id: r.id || `FR00${i + 1}`,
-    incident_type: r.incident_type || 'Landslide / Mudflow',
-    severity: r.severity || 'High',
-    location: r.location_name || (r.affected_route === 'R001' ? 'Jiribam, Manipur' : 'Sonapur, Assam'),
-    affected_route: r.affected_route === 'R001' ? 'Guwahati → Imphal' : r.affected_route === 'R002' ? 'Shillong → Silchar' : (r.affected_route || 'NH27 / NH2'),
-    reporter_role: r.reporter_role || 'Field Officer',
-    time: r.created_at ? `${Math.floor((Date.now() - new Date(r.created_at).getTime()) / 60000) || 10} mins ago` : `${(i + 1) * 2} hours ago`,
-    sync_status: r.status === 'Pending Sync' ? 'Pending Sync' : 'Synced',
-    verification_status: r.status === 'Verified' ? 'Verified' : 'Pending Verification',
-    description: r.description || 'Monitored ground obstacle reported by patrol unit.',
-    latitude: r.latitude || '25.0000',
-    longitude: r.longitude || '92.5000',
-    photo_url: r.photo_url
-  })) : sampleReports;
+  // Directly normalize all actual field reports from state/Supabase
+  const normalizedReports = (fieldReports || []).map((r, i) => {
+    const syncStatus = r.status === 'Pending Sync' || r.is_offline ? 'Pending Sync' : 'Synced';
+    const verificationStatus = r.status === 'Verified' ? 'Verified' : 'Pending Verification';
+    const loc = r.location_name || r.location || (r.affected_route === 'R001' ? 'Jiribam, Manipur' : 'Sonapur, Assam');
+    const corridor = getRouteLabel(r.affected_route);
+    const createdAt = r.created_at || new Date().toISOString();
 
-  // Counts matching reference UI
-  const totalCount = 27;
-  const pendingSyncCount = offlineQueueCount > 0 ? offlineQueueCount : 2;
-  const pendingVerificationCount = 6;
-  const verifiedCount = 18;
+    return {
+      id: r.id || `FR-${String(i + 1).padStart(3, '0')}`,
+      incident_type: r.incident_type || 'Road Hazard',
+      severity: r.severity || 'Moderate',
+      location: loc,
+      affected_route: corridor,
+      raw_route: r.affected_route,
+      reporter_role: r.reporter_role || 'Field Officer',
+      created_at: createdAt,
+      time: formatRelativeTime(createdAt),
+      exact_time: formatExactDateTime(createdAt),
+      sync_status: syncStatus,
+      verification_status: verificationStatus,
+      description: r.description || 'Observed ground obstacle reported by patrol unit.',
+      latitude: r.latitude ? String(r.latitude) : '25.0000',
+      longitude: r.longitude ? String(r.longitude) : '92.5000',
+      photo_url: r.photo_url || null
+    };
+  });
+
+  // Category counts calculated dynamically from actual report data
+  const totalCount = normalizedReports.length;
+  const pendingSyncCount = normalizedReports.filter(r => r.sync_status === 'Pending Sync').length;
+  const pendingVerificationCount = normalizedReports.filter(r => r.verification_status === 'Pending Verification' && r.sync_status !== 'Pending Sync').length;
+  const verifiedCount = normalizedReports.filter(r => r.verification_status === 'Verified').length;
 
   // Filter logic
-  const filteredReports = combinedReports.filter(r => {
+  const filteredReports = normalizedReports.filter(r => {
     // Tab filter
     if (activeTab === 'PENDING_SYNC' && r.sync_status !== 'Pending Sync') return false;
-    if (activeTab === 'PENDING_VERIFY' && r.verification_status !== 'Pending Verification') return false;
+    if (activeTab === 'PENDING_VERIFY' && (r.verification_status !== 'Pending Verification' || r.sync_status === 'Pending Sync')) return false;
     if (activeTab === 'VERIFIED' && r.verification_status !== 'Verified') return false;
 
     // Dropdown Filters
@@ -153,7 +183,8 @@ export default function FieldReports({
       const matchLoc = (r.location || '').toLowerCase().includes(q);
       const matchRoute = (r.affected_route || '').toLowerCase().includes(q);
       const matchRole = (r.reporter_role || '').toLowerCase().includes(q);
-      return matchId || matchType || matchLoc || matchRoute || matchRole;
+      const matchDesc = (r.description || '').toLowerCase().includes(q);
+      return matchId || matchType || matchLoc || matchRoute || matchRole || matchDesc;
     }
 
     return true;
@@ -208,6 +239,7 @@ export default function FieldReports({
           latitude,
           longitude,
           affected_route: affectedRoute,
+          location_name: locationName.trim(),
           reporter_role: reporterRole,
           photo_url: photoDataUrl
         });
@@ -466,91 +498,103 @@ export default function FieldReports({
               </tr>
             </thead>
             <tbody>
-              {filteredReports.map((r, idx) => {
-                const isCrit = r.severity === 'Critical';
-                const isHigh = r.severity === 'High';
-                const isSynced = r.sync_status === 'Synced';
-                const isVerified = r.verification_status === 'Verified';
+              {filteredReports.length === 0 ? (
+                <tr>
+                  <td colSpan="10" style={{ textAlign: 'center', padding: '2.5rem 1rem', color: '#64748b' }}>
+                    <FileSpreadsheet size={32} style={{ opacity: 0.4, margin: '0 auto 8px auto', display: 'block' }} />
+                    <strong style={{ display: 'block', fontSize: '0.9rem', color: 'var(--text-primary)' }}>No hazard reports match the selected filters</strong>
+                    <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                      Try adjusting your search query, status dropdown, or category tab.
+                    </span>
+                  </td>
+                </tr>
+              ) : (
+                filteredReports.map((r, idx) => {
+                  const isCrit = r.severity === 'Critical';
+                  const isHigh = r.severity === 'High';
+                  const isSynced = r.sync_status === 'Synced';
+                  const isVerified = r.verification_status === 'Verified';
 
-                return (
-                  <tr key={r.id || idx}>
-                    {/* Report ID */}
-                    <td>
-                      <strong style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-                        {r.id}
-                      </strong>
-                    </td>
+                  return (
+                    <tr key={r.id || idx}>
+                      {/* Report ID */}
+                      <td>
+                        <strong style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                          {r.id}
+                        </strong>
+                      </td>
 
-                    {/* Incident Type */}
-                    <td>
-                      <strong style={{ color: 'var(--text-primary)' }}>{r.incident_type}</strong>
-                    </td>
+                      {/* Incident Type */}
+                      <td>
+                        <strong style={{ color: 'var(--text-primary)' }}>{r.incident_type}</strong>
+                      </td>
 
-                    {/* Severity */}
-                    <td>
-                      <span className={`pill-badge ${isCrit ? 'pill-red' : isHigh ? 'pill-orange' : 'pill-yellow'}`}>
-                        {r.severity}
-                      </span>
-                    </td>
+                      {/* Severity */}
+                      <td>
+                        <span className={`pill-badge ${isCrit ? 'pill-red' : isHigh ? 'pill-orange' : 'pill-yellow'}`}>
+                          {r.severity}
+                        </span>
+                      </td>
 
-                    {/* Location */}
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <MapPin size={13} color="#0284c7" />
-                        <span>{r.location}</span>
-                      </div>
-                    </td>
+                      {/* Location */}
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <MapPin size={13} color="#0284c7" />
+                          <span>{r.location}</span>
+                        </div>
+                      </td>
 
-                    {/* Affected Route */}
-                    <td>
-                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{r.affected_route}</span>
-                    </td>
+                      {/* Affected Route */}
+                      <td>
+                        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{r.affected_route}</span>
+                      </td>
 
-                    {/* Reported By */}
-                    <td>
-                      <span style={{ color: '#475569' }}>{r.reporter_role}</span>
-                    </td>
+                      {/* Reported By */}
+                      <td>
+                        <span style={{ color: '#475569' }}>{r.reporter_role}</span>
+                      </td>
 
-                    {/* Time */}
-                    <td>
-                      <span style={{ color: '#64748b', fontSize: '0.8rem' }}>{r.time}</span>
-                    </td>
+                      {/* Time */}
+                      <td title={r.exact_time}>
+                        <span style={{ color: '#64748b', fontSize: '0.8rem', cursor: 'default' }}>{r.time}</span>
+                      </td>
 
-                    {/* Sync Status */}
-                    <td>
-                      <span className={`pill-badge ${isSynced ? 'pill-green' : 'pill-orange'}`}>
-                        {r.sync_status}
-                      </span>
-                    </td>
+                      {/* Sync Status */}
+                      <td>
+                        <span className={`pill-badge ${isSynced ? 'pill-green' : 'pill-orange'}`}>
+                          {r.sync_status}
+                        </span>
+                      </td>
 
-                    {/* Verification Status */}
-                    <td>
-                      <span className={`pill-badge ${isVerified ? 'pill-green' : 'pill-yellow'}`}>
-                        {r.verification_status}
-                      </span>
-                    </td>
+                      {/* Verification Status */}
+                      <td>
+                        <span className={`pill-badge ${isVerified ? 'pill-green' : 'pill-yellow'}`}>
+                          {r.verification_status}
+                        </span>
+                      </td>
 
-                    {/* Actions */}
-                    <td style={{ textAlign: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                        <button
-                          onClick={() => setSelectedReport(r)}
-                          className="btn-ref-view"
-                        >
-                          View
-                        </button>
-                        <button
-                          onClick={() => setSelectedReport(r)}
-                          className="btn-ref-more"
-                          title="Options"
-                        >
-                          <MoreVertical size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+                      {/* Actions */}
+                      <td style={{ textAlign: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          <button
+                            onClick={() => setSelectedReport(r)}
+                            className="btn-ref-view"
+                          >
+                            View
+                          </button>
+                          <button
+                            onClick={() => setSelectedReport(r)}
+                            className="btn-ref-more"
+                            title="Options"
+                          >
+                            <MoreVertical size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -579,7 +623,7 @@ export default function FieldReports({
                     {selectedReport.id} • {selectedReport.incident_type}
                   </h3>
                   <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                    {selectedReport.time} • Reported by: {selectedReport.reporter_role}
+                    {selectedReport.time} ({selectedReport.exact_time}) • Reported by: {selectedReport.reporter_role}
                   </span>
                 </div>
               </div>
@@ -645,9 +689,11 @@ export default function FieldReports({
               </button>
               {selectedReport.verification_status !== 'Verified' && (
                 <button
-                  onClick={() => {
-                    setSelectedReport({ ...selectedReport, verification_status: 'Verified' });
-                    alert(`Report ${selectedReport.id} verified and updated!`);
+                  onClick={async () => {
+                    if (onVerifyReport) {
+                      await onVerifyReport(selectedReport.id);
+                    }
+                    setSelectedReport({ ...selectedReport, verification_status: 'Verified', sync_status: 'Synced' });
                   }}
                   className="btn btn-primary btn-sm"
                   style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
