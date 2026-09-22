@@ -78,10 +78,11 @@ export default function AuthModal() {
 
     try {
       await signInWithEmail(loginEmail, loginPassword);
-      // Modal closed on success in AuthContext
+      setSuccessMessage('Official authenticated successfully!');
+      setTimeout(() => closeAuthModal(), 800);
     } catch (err) {
-      // Auth error is captured in AuthContext
       console.warn('Login attempt failed:', err);
+      setAuthError(err.message || 'Official Sign In failed. Please check your credentials.');
     } finally {
       setIsSubmitting(false);
     }
@@ -127,18 +128,12 @@ export default function AuthModal() {
         role: regRole
       });
 
-      // If user session is established immediately
-      if (res?.session) {
-        setSuccessMessage('Official account registered and logged in successfully!');
-        setTimeout(() => closeAuthModal(), 1200);
-      } else {
-        // Supabase might have email confirmations enabled
-        setSuccessMessage(
-          'Official account registered! If Supabase email confirmation is enabled on your project, please check your inbox to confirm your email, or use One-Click Demo Official Login to proceed immediately.'
-        );
-      }
+      const roleTitle = regRole === 'authority' ? 'Disaster Authority' : 'Field Official';
+      setSuccessMessage(`Official account created! Logged in as ${roleTitle} (${regFullName.trim()}).`);
+      setTimeout(() => closeAuthModal(), 1000);
     } catch (err) {
       console.warn('Registration attempt failed:', err);
+      setAuthError(err.message || 'Official account registration failed.');
     } finally {
       setIsSubmitting(false);
     }

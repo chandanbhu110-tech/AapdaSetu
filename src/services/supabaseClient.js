@@ -99,8 +99,25 @@ export async function upsertProfile(profile) {
       .maybeSingle();
 
     if (error) {
-      console.warn('Could not upsert profile into profiles table:', error.message);
-      return null;
+      console.warn('Extended profile upsert warning, retrying with core schema columns:', error.message);
+      // Fallback: If custom columns like agency/designation/official_id are not yet migrated in Postgres
+      const coreProfile = {
+        id: profile.id,
+        email: profile.email,
+        full_name: profile.full_name,
+        role: profile.role || 'official'
+      };
+      const { data: coreData, error: coreError } = await supabase
+        .from('profiles')
+        .upsert(coreProfile, { onConflict: 'id' })
+        .select()
+        .maybeSingle();
+
+      if (coreError) {
+        console.warn('Core profile upsert failed:', coreError.message);
+        return null;
+      }
+      return coreData;
     }
     return data;
   } catch (err) {

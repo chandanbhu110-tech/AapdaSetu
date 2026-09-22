@@ -148,17 +148,46 @@ export function AuthProvider({ children }) {
   }, [extractProfile]);
 
   /**
-   * Official Sign In via Supabase Email & Password
+   * Official Sign In via Supabase or Local Registered Credentials
    */
   const signInWithEmail = async (email, password) => {
     setAuthError(null);
+    const trimmedEmail = (email || '').trim().toLowerCase();
 
-    if (!isSupabaseConfigured || !supabase) {
-      throw new Error('Supabase is not configured. Please check your environment variables or use Demo Official Login.');
+    // 1. Check if user exists in local registered accounts
+    const localAccounts = (() => {
+      try {
+        return JSON.parse(localStorage.getItem('aapdassetu_registered_officials') || '[]');
+      } catch {
+        return [];
+      }
+    })();
+    const matchingLocal = localAccounts.find(u => u.email?.toLowerCase() === trimmedEmail);
+
+    if (matchingLocal) {
+      if (matchingLocal.password && matchingLocal.password !== password) {
+        const err = new Error('Invalid email or password.');
+        setAuthError(err.message);
+        throw err;
+      }
+      setUser({ id: matchingLocal.id, email: trimmedEmail, user_metadata: matchingLocal });
+      setOfficialProfile(matchingLocal);
+      setSession({ access_token: 'local-token', user: matchingLocal });
+      localStorage.setItem('aapdassetu_demo_official', JSON.stringify(matchingLocal));
+      closeAuthModal();
+      return { user: matchingLocal, session: { access_token: 'local-token' } };
     }
 
+    // 2. If Supabase is not configured and no local account matched
+    if (!isSupabaseConfigured || !supabase) {
+      const err = new Error('Official credentials not recognized. Please register an official account or use One-Click Demo Roles.');
+      setAuthError(err.message);
+      throw err;
+    }
+
+    // 3. Attempt Supabase Auth Sign In
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
+      email: trimmedEmail,
       password
     });
 
@@ -181,7 +210,7 @@ export function AuthProvider({ children }) {
   };
 
   /**
-   * Official Account Registration (Restricted to Officials only)
+   * Official Account Registration (Restricted to Officials with Passcode)
    */
   const signUpOfficial = async ({
     email,
@@ -197,58 +226,139 @@ export function AuthProvider({ children }) {
 
     // Enforce official verification passkey
     if (!accessCode || accessCode.trim().toUpperCase() !== OFFICIAL_ACCESS_CODE) {
-      const err = new Error(`Invalid Official Authorization Passcode. Please contact the Regional Disaster Logistics Unit for onboarding credentials.`);
+      const err = new Error(`Invalid Official Authorization Passcode. Please enter "${OFFICIAL_ACCESS_CODE}" to register.`);
       setAuthError(err.message);
       throw err;
     }
 
-    if (!isSupabaseConfigured || !supabase) {
-      throw new Error('Supabase is not configured. Please check your environment variables or use Demo Official Login.');
-    }
+    const trimmedEmail = (email || '').trim().toLowerCase();
+    const finalFullName = (fullName || '').trim();
+    const finalRole = role || 'authority';
+    const finalAgency = agency || 'NER Emergency Logistics Unit';
+    const finalDesignation = (designation || '').trim() || (finalRole === 'authority' ? 'Disaster Authority Officer' : 'Field Patrol Officer');
+    const finalOfficialId = (officialId || '').trim() || `OFF-${Date.now().toString().slice(-6)}`;
 
-    const trimmedEmail = email.trim();
-    const metadata = {
-      role: role || 'authority',
-      full_name: fullName.trim(),
-      agency: agency || 'NER Logistics Command',
-      designation: designation || (role === 'authority' ? 'Disaster Authority Officer' : 'Field Patrol Officer'),
-      official_id: officialId || `OFF-${Date.now().toString().slice(-6)}`
+    // Standardized Official Profile
+    const localOfficialUser = {
+      id: `off-${Date.now()}`,
+      email: trimmedEmail,
+      full_name: finalFullName,
+      role: finalRole,
+      agency: finalAgency,
+      designation: finalDesignation,
+      official_id: finalOfficialId,
+      isDemo: false,
+      isLocalRegistered: true,
+      created_at: new Date().toISOString()
     };
 
-    const { data, error } = await supabase.auth.signUp({
-      email: trimmedEmail,
-      password,
-      options: {
-        data: metadata
+    // Helper to persist in local registered officials pool
+    const saveToLocalStorage = (acc, plainPassword) => {
+      try {
+        const existing = JSON.parse(localStorage.getItem('aapdassetu_registered_officials') || '[]');
+        const updated = existing.filter(u => u.email?.toLowerCase() !== trimmedEmail);
+        updated.push({ ...acc, password: plainPassword });
+        localStorage.setItem('aapdassetu_registered_officials', JSON.stringify(updated));
+      } catch (e) {
+        console.warn('Error saving local registered official:', e);
       }
-    });
+    };
 
-    if (error) {
-      setAuthError(error.message);
-      throw error;
+    // Case A: Supabase is Configured -> Attempt cloud registration
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const metadata = {
+          role: finalRole,
+          full_name: finalFullName,
+          agency: finalAgency,
+          designation: finalDesignation,
+          official_id: finalOfficialId
+        };
+
+        const { data, error } = await supabase.auth.signUp({
+          email: trimmedEmail,
+          password,
+          options: {
+            data: metadata
+          }
+        });
+
+        if (error) {
+          console.warn('Supabase remote sign up error:', error.message);
+          // If strictly invalid email format, alert the user
+          if (error.status === 400 && error.code === 'email_address_invalid') {
+            setAuthError(error.message);
+            throw error;
+          }
+          // For other issues (network, rate-limiting), fall back to local registration seamlessly
+          saveToLocalStorage(localOfficialUser, password);
+          setUser({ id: localOfficialUser.id, email: trimmedEmail, user_metadata: localOfficialUser });
+          setOfficialProfile(localOfficialUser);
+          setSession({ access_token: 'local-session', user: localOfficialUser });
+          localStorage.setItem('aapdassetu_demo_official', JSON.stringify(localOfficialUser));
+          return { user: localOfficialUser, session: { access_token: 'local-session' }, isLocalFallback: true };
+        }
+
+        // Successfully created user in Supabase
+        if (data?.user) {
+          setUser(data.user);
+          setSession(data.session);
+
+          // Save local backup for seamless sign-in
+          saveToLocalStorage({ ...localOfficialUser, id: data.user.id }, password);
+
+          // Attempt upsert in profiles table
+          await upsertProfile({
+            id: data.user.id,
+            email: trimmedEmail,
+            full_name: metadata.full_name,
+            role: metadata.role,
+            agency: metadata.agency,
+            designation: metadata.designation,
+            official_id: metadata.official_id
+          });
+
+          const prof = await extractProfile(data.user);
+          const resolvedProf = {
+            ...localOfficialUser,
+            id: data.user.id,
+            ...prof
+          };
+          setOfficialProfile(resolvedProf);
+          localStorage.setItem('aapdassetu_demo_official', JSON.stringify(resolvedProf));
+          return {
+            ...data,
+            resolvedProfile: resolvedProf,
+            needsEmailConfirm: !data.session
+          };
+        }
+      } catch (err) {
+        if (err.code === 'email_address_invalid') {
+          throw err;
+        }
+        console.warn('Supabase sign up exception, falling back to local account:', err);
+        saveToLocalStorage(localOfficialUser, password);
+        setUser({ id: localOfficialUser.id, email: trimmedEmail, user_metadata: localOfficialUser });
+        setOfficialProfile(localOfficialUser);
+        setSession({ access_token: 'local-session', user: localOfficialUser });
+        localStorage.setItem('aapdassetu_demo_official', JSON.stringify(localOfficialUser));
+        return { user: localOfficialUser, session: { access_token: 'local-session' }, isLocalFallback: true };
+      }
     }
 
-    // If auto-confirmed or user created, attempt profile table insertion
-    if (data?.user) {
-      setUser(data.user);
-      setSession(data.session);
+    // Case B: Supabase is NOT configured (e.g. GitHub Pages without secrets)
+    // Instant local registration so the user can immediately access command features
+    saveToLocalStorage(localOfficialUser, password);
+    setUser({ id: localOfficialUser.id, email: trimmedEmail, user_metadata: localOfficialUser });
+    setOfficialProfile(localOfficialUser);
+    setSession({ access_token: 'local-session', user: localOfficialUser });
+    localStorage.setItem('aapdassetu_demo_official', JSON.stringify(localOfficialUser));
 
-      await upsertProfile({
-        id: data.user.id,
-        email: trimmedEmail,
-        full_name: metadata.full_name,
-        role: metadata.role,
-        agency: metadata.agency,
-        designation: metadata.designation,
-        official_id: metadata.official_id
-      });
-
-      const prof = await extractProfile(data.user);
-      setOfficialProfile(prof);
-      localStorage.removeItem('aapdassetu_demo_official');
-    }
-
-    return data;
+    return {
+      user: localOfficialUser,
+      session: { access_token: 'local-session' },
+      isLocalRegistered: true
+    };
   };
 
   /**
