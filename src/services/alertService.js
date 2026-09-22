@@ -125,7 +125,7 @@ class AlertEngineManager {
   /**
    * Evaluates system conditions idempotently without duplicate insertions
    */
-  async evaluateSystemConditions({ vehicles = [], routes = [], predictions = {}, weatherMap = {} }) {
+  async evaluateSystemConditions({ vehicles = [], routes = [], predictions = {}, weatherMap = {}, incidents = [] }) {
     if (this.isEvaluating) return;
     this.isEvaluating = true;
 
@@ -200,6 +200,27 @@ class AlertEngineManager {
             vehicle_id: v.id,
             action_required: 'Monitor telemetry and arrange intermediate cold/dry holding if required.'
           });
+        }
+      }
+
+      // 5. Significant Ground Hazard / Field Incident Rule
+      // Surfaces an operational alert for any Critical or High severity hazard affecting a corridor
+      if (Array.isArray(incidents)) {
+        for (const inc of incidents) {
+          const isSignificant = inc.severity === 'Critical' || inc.severity === 'High';
+          if (isSignificant && inc.affected_route) {
+            const cleanIncId = (inc.id || inc.report_id || 'HAZARD').replace(/[^a-zA-Z0-9_-]/g, '');
+            await this.createAlertIfNotExists({
+              alert_id: `ALT-HAZARD-${cleanIncId}`,
+              title: `${inc.severity === 'Critical' ? 'Critical Hazard' : 'Severe Hazard'}: ${inc.type || inc.incident_type || 'Road Obstruction'}`,
+              type: inc.type || inc.incident_type || 'Road Hazard',
+              severity: inc.severity,
+              description: `Ground hazard reported on ${inc.affected_route} (${inc.location_name || inc.location || 'Corridor'}): ${inc.description || 'Passage obstructed.'}`,
+              route_id: inc.affected_route,
+              vehicle_id: null,
+              action_required: 'Immediate corridor risk evaluation and alternate routing recommended.'
+            });
+          }
         }
       }
     } finally {

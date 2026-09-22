@@ -11,7 +11,8 @@ import {
   Compass, 
   AlertTriangle,
   Radio,
-  ExternalLink
+  ExternalLink,
+  ShieldCheck
 } from 'lucide-react';
 import NERMap from '../components/Map/NERMap';
 import { DEMO_ROUTES } from '../data/demoRoutes';
@@ -36,6 +37,9 @@ export default function Dashboard({
   const criticalAlertsCount = alerts.filter(a => a?.severity === 'Critical' && !a?.is_acknowledged).length;
   const activeVehiclesCount = vehicles.filter(v => v?.status === 'On Route' || v?.status === 'Delayed').length;
   const fieldReportsCount = fieldReports.length || 0;
+  const verifiedReports = fieldReports.filter(r => r?.status === 'Verified' || r?.verification_status === 'Verified');
+  const verifiedReportsCount = verifiedReports.length;
+  const pendingReportsCount = fieldReportsCount - verifiedReportsCount;
 
   // Primary demo spotlight route
   const defaultRoute = DEMO_ROUTES[0] || {
@@ -105,15 +109,36 @@ export default function Dashboard({
         </div>
 
         {/* Card 4: Field Reports */}
-        <div className="summary-card">
+        <div 
+          className="summary-card" 
+          onClick={() => onNavigate('field-reports')}
+          style={{ cursor: 'pointer' }}
+          title="View ground field reports & verification status"
+          id="dashboard-card-field-reports"
+        >
           <div className="summary-card-top">
             <span className="summary-card-title">Field Reports</span>
             <div className="summary-card-icon" style={{ background: '#dcfce7', color: '#16a34a' }}>
               <FileSpreadsheet size={18} />
             </div>
           </div>
-          <div className="summary-card-value">{fieldReportsCount}</div>
-          <div className="summary-card-status">Ground Hazards &amp; Incident Stream</div>
+          <div className="summary-card-value" style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+            <span>{fieldReportsCount}</span>
+            <span style={{ 
+              fontSize: '0.78rem', 
+              fontWeight: 700, 
+              color: '#15803d', 
+              background: '#f0fdf4', 
+              border: '1px solid #bbf7d0', 
+              padding: '2px 8px', 
+              borderRadius: '9999px' 
+            }}>
+              {verifiedReportsCount} Verified
+            </span>
+          </div>
+          <div className="summary-card-status" style={{ color: pendingReportsCount > 0 ? '#b45309' : '#15803d', fontWeight: 500 }}>
+            {verifiedReportsCount} Confirmed • {pendingReportsCount > 0 ? `${pendingReportsCount} Awaiting Authority` : 'All Reviewed'}
+          </div>
         </div>
       </div>
 
@@ -233,6 +258,75 @@ export default function Dashboard({
               <span>Evaluate Safe Alternate</span>
               <ArrowRight size={14} />
             </button>
+          </div>
+
+          {/* Verified Field Hazard Intel Feed (Updated in real-time by Authority) */}
+          <div className="card" style={{ padding: '1rem' }} id="dashboard-verified-hazards-panel">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <ShieldCheck size={18} color="#16a34a" />
+                <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a', margin: 0 }}>
+                  Authority-Verified Ground Hazards ({verifiedReportsCount})
+                </h4>
+              </div>
+              <button
+                onClick={() => onNavigate('field-reports')}
+                style={{ background: 'transparent', border: 'none', color: '#0284c7', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px' }}
+                id="btn-dashboard-view-reports"
+              >
+                <span>Manage Field Reports</span>
+                <ArrowRight size={13} />
+              </button>
+            </div>
+
+            {verifiedReports.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                {verifiedReports.slice(0, 3).map((report, idx) => (
+                  <div
+                    key={report.id || report.report_id || idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.65rem 0.85rem',
+                      background: '#f8fafc',
+                      borderRadius: '8px',
+                      border: '1px solid #e2e8f0',
+                      gap: '0.75rem',
+                      flexWrap: 'wrap'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      <div style={{
+                        width: '8px',
+                        height: '8px',
+                        borderRadius: '50%',
+                        background: report.severity === 'Critical' ? '#dc2626' : report.severity === 'High' ? '#ea580c' : '#f59e0b',
+                        flexShrink: 0
+                      }} />
+                      <div>
+                        <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#0f172a' }}>
+                          {report.incident_type} • <span style={{ color: '#0284c7' }}>{report.affected_route || 'Regional Highway'}</span>
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                          {report.description ? report.description.slice(0, 75) + '...' : 'Verified ground hazard obstructing corridor.'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span className="pill-badge pill-green" style={{ fontSize: '0.68rem', padding: '2px 7px' }}>
+                        ✓ Verified by {report.verified_by ? report.verified_by.split(' ')[0] : 'Authority'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '1.25rem', color: '#94a3b8', fontSize: '0.8rem' }}>
+                No verified ground hazards yet. All incoming reports are awaiting Authority verification.
+              </div>
+            )}
           </div>
         </div>
 

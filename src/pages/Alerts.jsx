@@ -9,15 +9,18 @@ import {
   MoreVertical, 
   X, 
   MapPin, 
-  Calendar
+  Calendar,
+  Languages
 } from 'lucide-react';
 import { formatRelativeTime, formatExactDateTime } from '../utils/timeFormat';
+import { SUPPORTED_LANGUAGES, getLocalizedAlert } from '../translations/alertTranslations';
 
 export default function Alerts({ alerts = [], onAcknowledgeAlert = null }) {
   const [activeTab, setActiveTab] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [severityFilter, setSeverityFilter] = useState('ALL');
   const [selectedAlert, setSelectedAlert] = useState(null);
+  const [alertLanguage, setAlertLanguage] = useState('en');
 
   // Live ticker to update relative timestamps every 30 seconds
   const [, setTicker] = useState(0);
@@ -35,7 +38,7 @@ export default function Alerts({ alerts = [], onAcknowledgeAlert = null }) {
     const isAck = a.is_acknowledged || a.status === 'Acknowledged' || isResolved;
     const statusText = isResolved ? 'Resolved' : isAck ? 'Acknowledged' : 'Active';
 
-    return {
+    const raw = {
       alert_id: a.alert_id || `ALT-${String(i + 1).padStart(3, '0')}`,
       severity: a.severity || 'Critical',
       title: a.title || 'Transit Alert',
@@ -50,6 +53,8 @@ export default function Alerts({ alerts = [], onAcknowledgeAlert = null }) {
       description: a.description || 'Monitored hazard on freight transit corridor.',
       action_required: a.action_required || 'Follow standard regional emergency protocol.'
     };
+
+    return getLocalizedAlert(raw, alertLanguage);
   });
 
   // Dynamically derived KPI and Tab counts from actual alerts
@@ -96,28 +101,66 @@ export default function Alerts({ alerts = [], onAcknowledgeAlert = null }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      {/* Header matching Reference */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+      {/* Header matching Reference with Multilingual Selector */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{
+            width: 42,
+            height: 42,
+            borderRadius: 10,
+            background: '#fee2e2',
+            color: '#dc2626',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            <Bell size={22} />
+          </div>
+          <div>
+            <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
+              Operations Alert Dispatch
+            </h2>
+            <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
+              Monitor critical logistics, route, weather and transit alerts.
+            </p>
+          </div>
+        </div>
+
+        {/* Multilingual Selector (English, Hindi, Assamese) */}
         <div style={{
-          width: 42,
-          height: 42,
-          borderRadius: 10,
-          background: '#fee2e2',
-          color: '#dc2626',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0
+          gap: '4px',
+          background: '#ffffff',
+          border: '1px solid #cbd5e1',
+          padding: '3px 4px',
+          borderRadius: 8,
+          boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
         }}>
-          <Bell size={22} />
-        </div>
-        <div>
-          <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-            Operations Alert Dispatch
-          </h2>
-          <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
-            Monitor critical logistics, route, weather and transit alerts.
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '0 6px', color: '#64748b' }}>
+            <Languages size={15} color="#0284c7" />
+            <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>Language:</span>
+          </div>
+          {SUPPORTED_LANGUAGES.map(lang => (
+            <button
+              key={lang.code}
+              onClick={() => setAlertLanguage(lang.code)}
+              style={{
+                padding: '4px 10px',
+                fontSize: '0.78rem',
+                fontWeight: alertLanguage === lang.code ? 700 : 500,
+                background: alertLanguage === lang.code ? '#0284c7' : 'transparent',
+                color: alertLanguage === lang.code ? '#ffffff' : '#475569',
+                border: 'none',
+                borderRadius: 6,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              {lang.nativeLabel}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -372,102 +415,105 @@ export default function Alerts({ alerts = [], onAcknowledgeAlert = null }) {
       </div>
 
       {/* Alert Details & Action Modal */}
-      {selectedAlert && (
-        <div className="ref-modal-overlay" onClick={() => setSelectedAlert(null)}>
-          <div className="ref-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="ref-modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                <div style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 8,
-                  background: selectedAlert.severity === 'Critical' ? '#fee2e2' : '#ffedd5',
-                  color: selectedAlert.severity === 'Critical' ? '#dc2626' : '#ea580c',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}>
-                  <AlertTriangle size={18} />
-                </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                    {selectedAlert.alert_id} • {selectedAlert.title}
-                  </h3>
-                  <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                    {selectedAlert.time} ({selectedAlert.exact_time}) • Status: {selectedAlert.status}
-                  </span>
-                </div>
-              </div>
-              <button 
-                onClick={() => setSelectedAlert(null)}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#64748b' }}
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="ref-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {/* Alert Description */}
-              <div style={{ background: '#f8fafc', padding: '0.85rem', borderRadius: 8, border: '1px solid #e2e8f0' }}>
-                <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>
-                  Incident Description
-                </div>
-                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-primary)', lineHeight: 1.45 }}>
-                  {selectedAlert.description}
-                </p>
-              </div>
-
-              {/* Recommended Protocol */}
-              {selectedAlert.action_required && (
-                <div style={{
-                  background: 'rgba(2, 132, 199, 0.08)',
-                  border: '1px solid rgba(2, 132, 199, 0.25)',
-                  borderRadius: 8,
-                  padding: '0.85rem'
-                }}>
-                  <div style={{ fontSize: '0.72rem', color: '#0369a1', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>
-                    Recommended Operations Protocol
+      {selectedAlert && (() => {
+        const modalAlert = getLocalizedAlert(selectedAlert, alertLanguage);
+        return (
+          <div className="ref-modal-overlay" onClick={() => setSelectedAlert(null)}>
+            <div className="ref-modal-card" onClick={(e) => e.stopPropagation()}>
+              <div className="ref-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <div style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 8,
+                    background: modalAlert.severity === 'Critical' ? '#fee2e2' : '#ffedd5',
+                    color: modalAlert.severity === 'Critical' ? '#dc2626' : '#ea580c',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <AlertTriangle size={18} />
                   </div>
-                  <p style={{ margin: 0, fontSize: '0.85rem', color: '#0369a1', fontWeight: 600 }}>
-                    {selectedAlert.action_required}
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {modalAlert.alert_id} • {modalAlert.title}
+                    </h3>
+                    <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                      {modalAlert.time} ({modalAlert.exact_time}) • Status: {modalAlert.status}
+                    </span>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setSelectedAlert(null)}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#64748b' }}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="ref-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {/* Alert Description */}
+                <div style={{ background: '#f8fafc', padding: '0.85rem', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>
+                    Incident Description
+                  </div>
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-primary)', lineHeight: 1.45 }}>
+                    {modalAlert.description}
                   </p>
                 </div>
-              )}
 
-              {/* Attributes Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem' }}>
-                <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: 6, border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600 }}>Location Sector</div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: 2 }}>{selectedAlert.location}</div>
-                </div>
-                <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: 6, border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600 }}>Affected Convoy</div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0284c7', marginTop: 2 }}>{selectedAlert.vehicle_id || 'All Traffic'}</div>
+                {/* Recommended Protocol */}
+                {modalAlert.action_required && (
+                  <div style={{
+                    background: 'rgba(2, 132, 199, 0.08)',
+                    border: '1px solid rgba(2, 132, 199, 0.25)',
+                    borderRadius: 8,
+                    padding: '0.85rem'
+                  }}>
+                    <div style={{ fontSize: '0.72rem', color: '#0369a1', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>
+                      Recommended Operations Protocol
+                    </div>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: '#0369a1', fontWeight: 600 }}>
+                      {modalAlert.action_required}
+                    </p>
+                  </div>
+                )}
+
+                {/* Attributes Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem' }}>
+                  <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600 }}>Location Sector</div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: 2 }}>{modalAlert.location}</div>
+                  </div>
+                  <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600 }}>Affected Convoy</div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0284c7', marginTop: 2 }}>{modalAlert.vehicle_id || 'All Traffic'}</div>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="ref-modal-footer">
-              <button 
-                onClick={() => setSelectedAlert(null)}
-                className="btn btn-outline btn-sm"
-              >
-                Close
-              </button>
-              {selectedAlert.status !== 'Acknowledged' && selectedAlert.status !== 'Resolved' && (
-                <button
-                  onClick={() => handleAcknowledge(selectedAlert.alert_id)}
-                  className="btn btn-primary btn-sm"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+              <div className="ref-modal-footer">
+                <button 
+                  onClick={() => setSelectedAlert(null)}
+                  className="btn btn-outline btn-sm"
                 >
-                  <Check size={14} />
-                  Acknowledge &amp; Dispatch Protocol
+                  Close
                 </button>
-              )}
+                {modalAlert.status !== 'Acknowledged' && modalAlert.status !== 'Resolved' && (
+                  <button
+                    onClick={() => handleAcknowledge(modalAlert.alert_id)}
+                    className="btn btn-primary btn-sm"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <Check size={14} />
+                    Acknowledge &amp; Dispatch Protocol
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

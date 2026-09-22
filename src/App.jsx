@@ -17,8 +17,11 @@ import { incidentService } from './services/incidentService';
 import { alertEngine } from './services/alertService';
 import { getAllPredictions } from './services/predictionService';
 import { isSupabaseConfigured } from './services/supabaseClient';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import AuthModal from './components/Auth/AuthModal';
 
-export default function App() {
+function AppContent() {
+  const { officialProfile } = useAuth();
   const [activePage, setActivePage] = useState('dashboard');
   const [selectedRouteId, setSelectedRouteId] = useState('R001');
 
@@ -77,6 +80,11 @@ export default function App() {
     return unsubscribe;
   }, []);
 
+  // Synchronize route health scores whenever monitored weather or incidents change
+  useEffect(() => {
+    setRoutes(getAllRoutes(weatherMap, incidents));
+  }, [weatherMap, incidents]);
+
   // 4. Subscribe to Alerts Engine
   useEffect(() => {
     const unsubscribe = alertEngine.subscribe((updatedAlerts) => {
@@ -92,8 +100,9 @@ export default function App() {
     const rSig = routes.map(r => `${r.id}:${r.dynamic_risk_tier}:${r.dynamic_health_score}`).join('|');
     const wSig = Object.keys(weatherMap).map(c => `${c}:${weatherMap[c]?.rainfall_mm > 20}:${(weatherMap[c]?.condition || '').toLowerCase().includes('thunderstorm')}`).join('|');
     const pSig = Object.keys(predictions).map(k => `${k}:${predictions[k]?.risk_level}:${predictions[k]?.disruption_probability_pct >= 75}`).join('|');
-    return `${vSig}##${rSig}##${wSig}##${pSig}`;
-  }, [vehicles, routes, weatherMap, predictions]);
+    const iSig = incidents.map(i => `${i.id}:${i.severity}:${i.affected_route}`).join('|');
+    return `${vSig}##${rSig}##${wSig}##${pSig}##${iSig}`;
+  }, [vehicles, routes, weatherMap, predictions, incidents]);
 
   useEffect(() => {
     if (routes.length > 0 && vehicles.length > 0) {
@@ -101,7 +110,8 @@ export default function App() {
         vehicles,
         routes,
         predictions,
-        weatherMap
+        weatherMap,
+        incidents
       });
     }
   }, [alertEvaluationSignature]);
@@ -120,14 +130,28 @@ export default function App() {
   };
 
   const handleSubmitFieldReport = async (reportData) => {
-    const addedReport = await incidentService.addFieldReport(reportData);
+    const reporterIdentity = officialProfile 
+      ? `${officialProfile.full_name} (${officialProfile.agency})`
+      : (reportData.reporter_name ? `${reportData.reporter_name} (${reportData.reporter_role || 'Ground Reporter'})` : (reportData.reporter_role || 'Field Reporter'));
+
+    const addedReport = await incidentService.addFieldReport({
+      ...reportData,
+      reporter_id: reportData.reporter_id || reporterIdentity,
+      reporter_name: reportData.reporter_name || (officialProfile?.full_name || 'Field Reporter'),
+      reporter_phone: reportData.reporter_phone || '',
+      reporter_agency: reportData.reporter_agency || (officialProfile?.agency || ''),
+      reporter_role: reportData.reporter_role || 'Field Officer'
+    });
     // Refresh routes if incident affects a specific route
-    setRoutes(getAllRoutes(weatherMap));
+    setRoutes(getAllRoutes(weatherMap, incidentService.getIncidents()));
     return addedReport;
   };
 
   const handleVerifyFieldReport = async (reportId) => {
-    await incidentService.verifyReport(reportId);
+    const authoritySignatory = officialProfile 
+      ? `${officialProfile.full_name} (${officialProfile.agency || 'Disaster Authority'})`
+      : 'Disaster Authority Command';
+    await incidentService.verifyReport(reportId, authoritySignatory);
   };
 
   const handleAddVehicle = (newVehicle) => {
@@ -197,6 +221,7 @@ export default function App() {
               incidents={incidents}
               vehicles={vehicles}
               fieldReports={fieldReports}
+              alerts={alerts}
             />
           )}
 
@@ -214,6 +239,9 @@ export default function App() {
           {activePage === 'vehicles' && (
             <Vehicles
               vehicles={vehicles}
+              routes={routes}
+              alerts={alerts}
+              incidents={incidents}
               onAddVehicle={handleAddVehicle}
               onNavigate={(page) => setActivePage(page)}
             />
@@ -242,5 +270,14 @@ export default function App() {
         </main>
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+      <AuthModal />
+    </AuthProvider>
   );
 }

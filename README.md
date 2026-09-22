@@ -141,3 +141,4 @@ npm run dev
 1. **Synthetic Training Data**: The Random Forest classifier was trained on synthetic NER monsoon simulation data.
 2. **Simulated GPS Telemetry**: Vehicle positions advance along calculated corridor geometries using simulated timers; this does not connect to real physical OBD-II/GPS hardware.
 3. **Prototype Scope**: This software is a demonstration prototype designed for SIH and is not currently certified for production emergency services dispatch.
+

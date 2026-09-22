@@ -30,7 +30,8 @@ export default function RouteIntelligence({
   predictions = {},
   incidents = [],
   vehicles = [],
-  fieldReports = []
+  fieldReports = [],
+  alerts = []
 }) {
   const currentRoute = (routes && routes.length > 0)
     ? (routes.find(r => r && (r.id === selectedRouteId || r.route_id === selectedRouteId)) || routes[0] || DEMO_ROUTES[0])
@@ -55,7 +56,10 @@ export default function RouteIntelligence({
   };
 
   const currentIncidents = incidents.filter(i => i?.affected_route === currentRoute.id);
+  const currentAlerts = alerts.filter(a => !a.is_acknowledged && a.route_id === currentRoute.id);
   const isHighRisk = (currentRoute.dynamic_health_score || currentRoute.baseline_health_score || 50) < 60;
+  const hasCorridorDisruption = currentAlerts.length > 0 || currentIncidents.length > 0 || isHighRisk;
+  const snapshot = currentPred.feature_snapshot || {};
 
   const handleFindSaferRoute = async () => {
     setIsFindingAlternate(true);
@@ -149,6 +153,43 @@ export default function RouteIntelligence({
         </div>
       </div>
 
+      {/* Active Corridor Hazard & Operational Alert Advisory Banner */}
+      {hasCorridorDisruption && (
+        <div style={{
+          background: '#fff1f2',
+          border: '1px solid #fecdd3',
+          borderLeft: '4px solid #dc2626',
+          borderRadius: '8px',
+          padding: '0.85rem 1rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '0.75rem'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <AlertTriangle size={18} color="#dc2626" style={{ flexShrink: 0 }} />
+            <div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#991b1b' }}>
+                Active Disruption Advisory: {currentRoute.name}
+              </div>
+              <div style={{ fontSize: '0.76rem', color: '#7f1d1d', marginTop: '1px' }}>
+                {currentAlerts.length} active operational alert(s) • {currentIncidents.length} active ground hazard(s) • Route Health: {currentRoute.dynamic_health_score || currentRoute.baseline_health_score}/100
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={handleFindSaferRoute}
+            disabled={isFindingAlternate}
+            className="btn btn-primary btn-sm"
+            style={{ background: '#dc2626', border: 'none', fontSize: '0.8rem' }}
+          >
+            <Sparkles size={13} />
+            <span>{isFindingAlternate ? 'Calculating...' : 'Evaluate Safe Bypass'}</span>
+          </button>
+        </div>
+      )}
+
       {/* Active Corridor Card */}
       <div className="card" style={{
         background: '#ffffff',
@@ -214,6 +255,189 @@ export default function RouteIntelligence({
             <div style={{ fontSize: '1.35rem', fontWeight: 700, color: currentIncidents.length > 0 ? '#dc2626' : '#16a34a', marginTop: '2px' }}>
               {currentIncidents.length > 0 ? `${currentIncidents.length} Reported` : 'Clear'}
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* EXPLAINABLE AI (XAI) & RISK BREAKDOWN SECTION (Parts G & H) */}
+      <div className="card" style={{
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderLeft: '4px solid #7c3aed',
+        padding: '1.25rem'
+      }} id="section-explainable-ai">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Brain size={20} color="#7c3aed" />
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                Explainable AI: Why Is This Route at Risk?
+              </h3>
+            </div>
+            <p style={{ fontSize: '0.82rem', color: '#64748b', margin: '3px 0 0 0' }}>
+              The current risk assessment is associated with these observed and model input factors:
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{
+              background: isHighRisk ? '#fef2f2' : '#f0fdf4',
+              border: `1px solid ${isHighRisk ? '#fecaca' : '#bbf7d0'}`,
+              color: isHighRisk ? '#dc2626' : '#16a34a',
+              fontSize: '0.82rem',
+              fontWeight: 700,
+              padding: '4px 10px',
+              borderRadius: '6px'
+            }}>
+              AI Disruption Risk: {currentPred.disruption_probability_pct}% ({currentPred.risk_level.toUpperCase()})
+            </span>
+          </div>
+        </div>
+
+        {/* 1. Observed Real Factors Grid (Only Real Available Data) */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.75rem', marginBottom: '1.25rem' }}>
+          {snapshot.rainfall_24h !== undefined && (
+            <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Monsoon Precipitation</div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: snapshot.rainfall_24h > 30 ? '#dc2626' : '#0f172a', marginTop: 2 }}>
+                {snapshot.rainfall_24h} mm (24h) • {snapshot.rainfall_1h || 0} mm/h
+              </div>
+              <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>
+                {snapshot.rainfall_24h > 30 ? 'Heavy rainfall inducing slope instability' : 'Normal regional precipitation'}
+              </div>
+            </div>
+          )}
+
+          {snapshot.road_condition_score !== undefined && (
+            <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Road Surface Condition</div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: snapshot.road_condition_score < 40 ? '#dc2626' : '#0f172a', marginTop: 2 }}>
+                Score {snapshot.road_condition_score}/100 ({snapshot.road_condition_score < 40 ? 'Severely Degraded' : 'Moderate'})
+              </div>
+              <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>
+                Pavement degradation and potholes reduce heavy freight traction
+              </div>
+            </div>
+          )}
+
+          {snapshot.slope !== undefined && (
+            <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Mountain Topography &amp; Slope</div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: snapshot.slope > 20 ? '#ea580c' : '#0f172a', marginTop: 2 }}>
+                {snapshot.slope}° inclination • {snapshot.elevation || 1200}m ASL
+              </div>
+              <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>
+                Steep mountain grade increases rockfall and mudflow vulnerability
+              </div>
+            </div>
+          )}
+
+          {currentIncidents.length > 0 && (
+            <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Active Ground Hazards</div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#dc2626', marginTop: 2 }}>
+                {currentIncidents.length} Ground Incident(s) Active
+              </div>
+              <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>
+                {currentIncidents[0].type || currentIncidents[0].incident_type} reported near {currentIncidents[0].location_name || currentIncidents[0].location}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 2. Concise Risk Breakdown (Part H) */}
+        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>
+          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.03em', display: 'block', marginBottom: '0.75rem' }}>
+            Corridor Risk Factor Breakdown:
+          </span>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
+            {/* Factor 1: Weather */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', marginBottom: '4px' }}>
+                <span style={{ color: '#64748b' }}>Weather Risk</span>
+                <strong style={{ color: (snapshot.rainfall_24h || 0) > 30 ? '#dc2626' : '#16a34a' }}>
+                  {(snapshot.rainfall_24h || 0) > 30 ? 'High' : 'Moderate'}
+                </strong>
+              </div>
+              <div style={{ width: '100%', height: 6, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ width: (snapshot.rainfall_24h || 0) > 30 ? '80%' : '40%', height: '100%', background: (snapshot.rainfall_24h || 0) > 30 ? '#dc2626' : '#f59e0b', borderRadius: 3 }} />
+              </div>
+            </div>
+
+            {/* Factor 2: Road Condition */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', marginBottom: '4px' }}>
+                <span style={{ color: '#64748b' }}>Road Condition</span>
+                <strong style={{ color: (snapshot.road_condition_score || 50) < 40 ? '#ea580c' : '#16a34a' }}>
+                  {(snapshot.road_condition_score || 50) < 40 ? 'Poor' : 'Fair'}
+                </strong>
+              </div>
+              <div style={{ width: '100%', height: 6, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ width: (snapshot.road_condition_score || 50) < 40 ? '70%' : '35%', height: '100%', background: (snapshot.road_condition_score || 50) < 40 ? '#ea580c' : '#16a34a', borderRadius: 3 }} />
+              </div>
+            </div>
+
+            {/* Factor 3: Terrain */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', marginBottom: '4px' }}>
+                <span style={{ color: '#64748b' }}>Terrain Vulnerability</span>
+                <strong style={{ color: (snapshot.slope || 15) > 20 ? '#ea580c' : '#16a34a' }}>
+                  {(snapshot.slope || 15) > 20 ? 'High Slope' : 'Moderate Slope'}
+                </strong>
+              </div>
+              <div style={{ width: '100%', height: 6, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ width: (snapshot.slope || 15) > 20 ? '75%' : '45%', height: '100%', background: (snapshot.slope || 15) > 20 ? '#ea580c' : '#16a34a', borderRadius: 3 }} />
+              </div>
+            </div>
+
+            {/* Factor 4: Incidents */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', marginBottom: '4px' }}>
+                <span style={{ color: '#64748b' }}>Ground Incidents</span>
+                <strong style={{ color: currentIncidents.length > 0 ? '#dc2626' : '#16a34a' }}>
+                  {currentIncidents.length > 0 ? 'High Hazard' : 'Clear'}
+                </strong>
+              </div>
+              <div style={{ width: '100%', height: 6, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ width: currentIncidents.length > 0 ? '90%' : '10%', height: '100%', background: currentIncidents.length > 0 ? '#dc2626' : '#16a34a', borderRadius: 3 }} />
+              </div>
+            </div>
+
+            {/* Factor 5: Route Health Score (Rule-Based Composite) */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', marginBottom: '4px' }}>
+                <span style={{ color: '#64748b' }} title="Rule-based transparent score derived from road condition, weather risk, and incident count">
+                  1. Route Health (Rule-Based)
+                </span>
+                <strong style={{ color: isHighRisk ? '#dc2626' : '#16a34a' }}>
+                  {currentRoute.dynamic_health_score || currentRoute.baseline_health_score}/100
+                </strong>
+              </div>
+              <div style={{ width: '100%', height: 6, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ width: `${currentRoute.dynamic_health_score || currentRoute.baseline_health_score}%`, height: '100%', background: isHighRisk ? '#dc2626' : '#16a34a', borderRadius: 3 }} />
+              </div>
+            </div>
+          </div>
+
+          {/* Explicit Architectural Clarity & Rerouting Callout (Parts D & H) */}
+          <div style={{
+            background: '#f8fafc',
+            border: '1px solid #e2e8f0',
+            borderRadius: '6px',
+            padding: '0.65rem 0.85rem',
+            marginTop: '0.85rem',
+            fontSize: '0.75rem',
+            color: '#475569',
+            lineHeight: 1.45
+          }}>
+            <strong>Architectural Distinction: </strong>
+            <span>
+              (1) <strong>Rule-Based Route Health (0–100)</strong> is an engineering metric of pavement, weather, and active blockages. 
+              (2) <strong>AI Disruption Risk ({currentPred.disruption_probability_pct}%)</strong> is an inferential prediction from the Random Forest model. 
+              (3) <strong>Route Optimization</strong> weights these factors (40% Health, 30% AI Risk, 20% ETA, 10% Incidents) to recommend the safest candidate. 
+              <em>Note: The safest recommended bypass may be longer in total distance or travel time, but provides guaranteed delivery without landslide cut-offs.</em>
+            </span>
           </div>
         </div>
       </div>

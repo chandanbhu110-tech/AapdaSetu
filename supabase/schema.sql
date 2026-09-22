@@ -95,19 +95,64 @@ CREATE TABLE IF NOT EXISTS alerts (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 7. FIELD REPORTS TABLE
+-- 7. FIELD REPORTS TABLE (Crowdsourced / Volunteer road hazard reports)
 CREATE TABLE IF NOT EXISTS field_reports (
-    id SERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_id VARCHAR(50),
     incident_type VARCHAR(100) NOT NULL,
     description TEXT NOT NULL,
-    severity VARCHAR(20) NOT NULL CHECK (severity IN ('Low', 'Moderate', 'High', 'Critical')),
+    severity VARCHAR(20) NOT NULL CHECK (severity IN ('Low', 'Moderate', 'Medium', 'High', 'Critical')),
     latitude NUMERIC(10, 6) NOT NULL,
     longitude NUMERIC(10, 6) NOT NULL,
-    affected_route VARCHAR(50) REFERENCES routes(id) ON DELETE SET NULL,
-    reporter_role VARCHAR(100) DEFAULT 'Citizen / Field Volunteer',
-    status VARCHAR(50) DEFAULT 'Pending Review' CHECK (status IN ('Pending Review', 'Verified', 'Rejected')),
+    affected_route VARCHAR(50),
+    reporter_id VARCHAR(100) DEFAULT 'Citizen / Field Volunteer',
+    photo_url TEXT,
+    status VARCHAR(50) DEFAULT 'Pending Verification' CHECK (status IN ('Pending Sync', 'Pending Verification', 'Verified', 'Rejected', 'Pending Review')),
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Enable RLS and public policies for field_reports
+ALTER TABLE field_reports ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow public select on field_reports" 
+ON field_reports FOR SELECT 
+USING (true);
+
+CREATE POLICY "Allow public insert on field_reports" 
+ON field_reports FOR INSERT 
+WITH CHECK (true);
+
+CREATE POLICY "Allow public update on field_reports" 
+ON field_reports FOR UPDATE 
+USING (true);
+
+-- 8. PROFILES TABLE (Official accounts linked to Supabase Auth)
+CREATE TABLE IF NOT EXISTS public.profiles (
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    role VARCHAR(50) DEFAULT 'official' CHECK (role IN ('official', 'admin')),
+    agency VARCHAR(100),
+    designation VARCHAR(100),
+    official_id VARCHAR(50),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow public or authenticated read on profiles" 
+ON public.profiles FOR SELECT 
+USING (true);
+
+CREATE POLICY "Allow users to insert their own profile" 
+ON public.profiles FOR INSERT 
+WITH CHECK (true);
+
+CREATE POLICY "Allow users to update their own profile" 
+ON public.profiles FOR UPDATE 
+USING (auth.uid() = id);
 
 -- ==============================================================================
 -- SEED DATA (Standard NER Corridors & Required Baseline Entities)

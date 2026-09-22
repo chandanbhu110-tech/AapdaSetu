@@ -15,11 +15,43 @@ import {
 import { formatRelativeTime, formatExactDateTime } from '../utils/timeFormat';
 import { vehicleTracker } from '../services/vehicleService';
 
-export default function Vehicles({ vehicles = [], onNavigate = null, onAddVehicle = null }) {
+export default function Vehicles({ vehicles = [], routes = [], alerts = [], incidents = [], onNavigate = null, onAddVehicle = null }) {
   const [activeTab, setActiveTab] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
+  // Helper to cross-reference vehicle route against active alerts & ground hazards
+  const getVehicleRouteRisk = (v) => {
+    if (!v) return { hasRisk: false, severity: 'Normal', alerts: [], incidents: [] };
+    const matchingRoute = routes.find(r => 
+      (v.route_id && (r.id === v.route_id || r.route_id === v.route_id)) ||
+      (r.origin === v.origin && r.destination === v.destination) ||
+      (v.origin && v.destination && r.name && r.name.includes(v.origin) && r.name.includes(v.destination))
+    );
+    const routeId = matchingRoute?.id || v.route_id || (v.origin === 'Guwahati' && v.destination === 'Imphal' ? 'R001' : null);
+
+    const routeAlerts = alerts.filter(a => 
+      !a.is_acknowledged && 
+      ((a.route_id && a.route_id === routeId) || (a.vehicle_id && a.vehicle_id === v.id))
+    );
+
+    const routeIncidents = incidents.filter(i => 
+      i.affected_route && i.affected_route === routeId && (i.severity === 'Critical' || i.severity === 'High')
+    );
+
+    const hasCritical = routeAlerts.some(a => a.severity === 'Critical') || routeIncidents.some(i => i.severity === 'Critical');
+    const hasHigh = routeAlerts.some(a => a.severity === 'High') || routeIncidents.some(i => i.severity === 'High');
+
+    return {
+      routeId,
+      matchingRoute,
+      hasRisk: hasCritical || hasHigh,
+      severity: hasCritical ? 'Critical' : hasHigh ? 'High' : 'Normal',
+      alerts: routeAlerts,
+      incidents: routeIncidents
+    };
+  };
 
   // Live timer ticker to keep relative timestamps current
   const [, setTicker] = useState(0);
@@ -305,11 +337,29 @@ export default function Vehicles({ vehicles = [], onNavigate = null, onAddVehicl
                       </span>
                     </td>
 
-                    {/* Current Route */}
+                    {/* Current Route with Risk Warning Indicator */}
                     <td>
-                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                        {v.origin || 'Guwahati'} → {v.destination || 'Imphal'}
-                      </span>
+                      <div>
+                        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                          {v.origin || 'Guwahati'} → {v.destination || 'Imphal'}
+                        </span>
+                        {(() => {
+                          const rk = getVehicleRouteRisk(v);
+                          if (!rk.hasRisk) return null;
+                          return (
+                            <div style={{ marginTop: '3px' }}>
+                              <span 
+                                className={`pill-badge ${rk.severity === 'Critical' ? 'pill-red' : 'pill-orange'}`}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '0.67rem', padding: '1px 6px' }}
+                                title={`${rk.alerts.length} active alert(s) on corridor`}
+                              >
+                                <AlertTriangle size={10} />
+                                <span>Route at {rk.severity} Risk</span>
+                              </span>
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </td>
 
                     {/* Current Location */}
@@ -449,6 +499,51 @@ export default function Vehicles({ vehicles = [], onNavigate = null, onAddVehicl
                   <div style={{ width: `${selectedVehicle.progress_percent || 45}%`, height: '100%', background: '#0284c7', borderRadius: 4 }} />
                 </div>
               </div>
+
+              {/* Route Risk & Operational Alert Warning Advisory */}
+              {(() => {
+                const sRisk = getVehicleRouteRisk(selectedVehicle);
+                if (!sRisk.hasRisk) return null;
+                return (
+                  <div style={{
+                    background: '#fff1f2',
+                    border: '1px solid #fecdd3',
+                    borderRadius: 8,
+                    padding: '0.85rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.5rem'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#be123c', fontWeight: 700, fontSize: '0.85rem' }}>
+                        <AlertTriangle size={16} />
+                        <span>Corridor Warning: Route at {sRisk.severity} Risk</span>
+                      </div>
+                      <span className="pill-badge pill-red" style={{ fontSize: '0.68rem' }}>
+                        Active Route Alert
+                      </span>
+                    </div>
+
+                    <p style={{ margin: 0, fontSize: '0.78rem', color: '#881337', lineHeight: 1.4 }}>
+                      {selectedVehicle.cargo} unit <strong>{selectedVehicle.id}</strong> is assigned to corridor <strong>{selectedVehicle.origin} → {selectedVehicle.destination}</strong> which currently has {sRisk.alerts.length} active operational alert(s) and {sRisk.incidents.length} ground hazard(s).
+                    </p>
+
+                    {onNavigate && (
+                      <button
+                        onClick={() => {
+                          setSelectedVehicle(null);
+                          onNavigate('route-intel');
+                        }}
+                        className="btn btn-primary btn-sm"
+                        style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.78rem', marginTop: '2px', background: '#be123c' }}
+                      >
+                        <Navigation size={13} />
+                        <span>Evaluate Safe Alternate Bypass in Route Intelligence →</span>
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Attributes Grid */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem' }}>

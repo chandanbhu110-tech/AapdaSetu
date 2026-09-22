@@ -2,7 +2,7 @@
   "metadata": {
     "model": "RandomForestClassifier",
     "engine": "Scikit-learn",
-    "evaluated_at": "2026-09-11T10:09:34.186706+00:00",
+    "evaluated_at": "2026-09-12T02:25:32.550212+00:00",
     "metrics": {
       "accuracy": 0.5792,
       "precision": 0.6048,
@@ -56,7 +56,7 @@
         "historical_disruptions": 6,
         "distance_to_incident": 3.2
       },
-      "predicted_at": "2026-09-11T10:09:34.159345+00:00",
+      "predicted_at": "2026-09-12T02:25:32.522185+00:00",
       "model_version": "RandomForestClassifier-v1.0-80/20"
     },
     "R002": {
@@ -102,7 +102,7 @@
         "historical_disruptions": 4,
         "distance_to_incident": 8.5
       },
-      "predicted_at": "2026-09-11T10:09:34.167480+00:00",
+      "predicted_at": "2026-09-12T02:25:32.531186+00:00",
       "model_version": "RandomForestClassifier-v1.0-80/20"
     },
     "R003": {
@@ -148,7 +148,7 @@
         "historical_disruptions": 5,
         "distance_to_incident": 12.0
       },
-      "predicted_at": "2026-09-11T10:09:34.176607+00:00",
+      "predicted_at": "2026-09-12T02:25:32.540189+00:00",
       "model_version": "RandomForestClassifier-v1.0-80/20"
     },
     "R001-ALT": {
@@ -179,7 +179,7 @@
         "historical_disruptions": 1,
         "distance_to_incident": 999.0
       },
-      "predicted_at": "2026-09-11T10:09:34.185696+00:00",
+      "predicted_at": "2026-09-12T02:25:32.548180+00:00",
       "model_version": "RandomForestClassifier-v1.0-80/20"
     }
   }

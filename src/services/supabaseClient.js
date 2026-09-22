@@ -8,8 +8,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta?.env?.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta?.env?.VITE_SUPABASE_ANON_KEY || '';
+const supabaseUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_URL) || '';
+const supabaseAnonKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_ANON_KEY) || '';
 
 export const isSupabaseConfigured = Boolean(
   supabaseUrl && 
@@ -56,5 +56,55 @@ export async function fetchWithFallback(tableName, fallbackData) {
       isDemoMode: true,
       source: 'DEMO DATA MODE'
     };
+  }
+}
+
+/**
+ * Fetch official user profile from Supabase profiles table
+ */
+export async function getProfile(userId) {
+  if (!isSupabaseConfigured || !supabase || !userId) {
+    return null;
+  }
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('Could not fetch profile from profiles table:', error.message);
+      return null;
+    }
+    return data;
+  } catch (err) {
+    console.warn('Profile fetch exception:', err);
+    return null;
+  }
+}
+
+/**
+ * Upsert official user profile to Supabase profiles table
+ */
+export async function upsertProfile(profile) {
+  if (!isSupabaseConfigured || !supabase || !profile?.id) {
+    return null;
+  }
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .upsert(profile, { onConflict: 'id' })
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.warn('Could not upsert profile into profiles table:', error.message);
+      return null;
+    }
+    return data;
+  } catch (err) {
+    console.warn('Profile upsert exception:', err);
+    return null;
   }
 }

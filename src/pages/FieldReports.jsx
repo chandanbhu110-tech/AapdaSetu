@@ -15,72 +15,21 @@ import {
   Camera, 
   Navigation, 
   Send,
-  UploadCloud
+  UploadCloud,
+  ShieldCheck,
+  ShieldAlert,
+  Lock,
+  Phone,
+  UserCheck,
+  AlertTriangle
 } from 'lucide-react';
-
-// Dynamic relative time formatting helper
-function formatRelativeTime(timestamp) {
-  if (!timestamp) return 'Recently';
-  const date = new Date(timestamp);
-  if (isNaN(date.getTime())) return String(timestamp);
-  
-  const now = Date.now();
-  const diffMs = now - date.getTime();
-  
-  // Handle slight future clock skew or within 45 seconds
-  if (diffMs < 45000) {
-    return 'Just now';
-  }
-  
-  const diffMinutes = Math.floor(diffMs / 60000);
-  if (diffMinutes < 2) {
-    return '1 min ago';
-  }
-  if (diffMinutes < 60) {
-    return `${diffMinutes} mins ago`;
-  }
-  
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours === 1) {
-    return '1 hour ago';
-  }
-  if (diffHours < 24) {
-    return `${diffHours} hours ago`;
-  }
-  
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays === 1) {
-    return '1 day ago';
-  }
-  if (diffDays < 7) {
-    return `${diffDays} days ago`;
-  }
-  
-  return date.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric'
-  });
-}
-
-// Exact date/time formatting helper
-function formatExactDateTime(timestamp) {
-  if (!timestamp) return '';
-  const date = new Date(timestamp);
-  if (isNaN(date.getTime())) return String(timestamp);
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  });
-}
+import { BASE_FIELD_REPORTS } from '../data/baselineReports';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function FieldReports({ 
   fieldReports = [], 
   onSubmitReport, 
-  onVerifyReport = null,
+  onVerifyReport,
   routes = [],
   isOnline = true,
   offlineQueueCount = 0,
@@ -88,21 +37,13 @@ export default function FieldReports({
   onToggleSimulatedOffline = null,
   onSyncOfflineReports = null
 }) {
+  const { isAuthority, officialProfile } = useAuth();
   const [activeTab, setActiveTab] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [incidentTypeFilter, setIncidentTypeFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [selectedReport, setSelectedReport] = useState(null);
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
-
-  // Periodic ticker to recalculate relative timestamps dynamically
-  const [, setTicker] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTicker(t => t + 1);
-    }, 30000);
-    return () => clearInterval(timer);
-  }, []);
 
   // Form states
   const [incidentType, setIncidentType] = useState('Landslide / Mudflow');
@@ -111,62 +52,111 @@ export default function FieldReports({
   const [latitude, setLatitude] = useState('24.7800');
   const [longitude, setLongitude] = useState('93.3100');
   const [affectedRoute, setAffectedRoute] = useState('R001');
-  const [reporterRole, setReporterRole] = useState('Field Officer');
   const [locationName, setLocationName] = useState('Sonapur, Assam');
   const [photoDataUrl, setPhotoDataUrl] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState(null);
   const [geoLocating, setGeoLocating] = useState(false);
 
-  const getRouteLabel = (routeId) => {
-    const found = routes.find(r => r.id === routeId);
-    if (found) return `${found.origin} → ${found.destination}`;
-    if (routeId === 'R001') return 'Guwahati → Imphal';
-    if (routeId === 'R002') return 'Shillong → Silchar';
-    if (routeId === 'R003') return 'Silchar → Aizawl';
-    if (routeId === 'R004') return 'Dimapur → Kohima';
-    return routeId || 'NER Corridor';
+  // Submitter Verification & Anti-Malpractice Identification States
+  const [reporterName, setReporterName] = useState(() => officialProfile?.full_name || '');
+  const [reporterPhone, setReporterPhone] = useState('');
+  const [reporterCategory, setReporterCategory] = useState(() => 
+    officialProfile?.role === 'authority' ? 'Disaster Authority Officer' : 'Field Officer / Highway Patrol'
+  );
+  const [reporterAgency, setReporterAgency] = useState(() => officialProfile?.agency || '');
+  const [reporterBadgeId, setReporterBadgeId] = useState(() => officialProfile?.official_id || '');
+  const [declarationChecked, setDeclarationChecked] = useState(false);
+
+  // Auto-sync submitter details if official logs in
+  useEffect(() => {
+    if (officialProfile) {
+      if (!reporterName) setReporterName(officialProfile.full_name || '');
+      if (!reporterAgency) setReporterAgency(officialProfile.agency || '');
+      if (!reporterBadgeId) setReporterBadgeId(officialProfile.official_id || '');
+      if (!reporterCategory || reporterCategory === 'Field Officer') {
+        setReporterCategory(officialProfile.role === 'authority' ? 'Disaster Authority Officer' : 'Field Officer / Highway Patrol');
+      }
+    }
+  }, [officialProfile]);
+
+  // Helper for human-readable time elapsed
+  const formatTimeAgo = (isoString) => {
+    if (!isoString) return 'Just now';
+    try {
+      const diffMs = Date.now() - new Date(isoString).getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      if (diffMins < 1) return 'Just now';
+      if (diffMins < 60) return `${diffMins} mins ago`;
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return `${diffHours} hours ago`;
+      const diffDays = Math.floor(diffHours / 24);
+      return `${diffDays} days ago`;
+    } catch {
+      return 'Recently';
+    }
   };
 
-  // Directly normalize all actual field reports from state/Supabase
-  const normalizedReports = (fieldReports || []).map((r, i) => {
-    const syncStatus = r.status === 'Pending Sync' || r.is_offline ? 'Pending Sync' : 'Synced';
-    const verificationStatus = r.status === 'Verified' ? 'Verified' : 'Pending Verification';
-    const loc = r.location_name || r.location || (r.affected_route === 'R001' ? 'Jiribam, Manipur' : 'Sonapur, Assam');
-    const corridor = getRouteLabel(r.affected_route);
-    const createdAt = r.created_at || new Date().toISOString();
+  // Authority-only verification handler
+  const handleVerify = async (reportId) => {
+    if (!isAuthority) {
+      alert('Permission Denied: Only Disaster Management Authority officers can verify field reports. Field officials can submit and view reports only.');
+      return;
+    }
+    if (onVerifyReport) {
+      await onVerifyReport(reportId);
+    }
+    setSelectedReport(prev => prev ? { ...prev, verification_status: 'Verified', status: 'Verified' } : null);
+    setFeedbackMsg({
+      type: 'success',
+      text: `Report ${reportId} successfully verified by Authority and published to live map!`
+    });
+    setTimeout(() => setFeedbackMsg(null), 5000);
+  };
 
+  // Complete combined dataset for both counts and table rendering:
+  // Source of truth is fieldReports (with fallback to baseline reports if empty)
+  const rawList = fieldReports && fieldReports.length > 0 ? fieldReports : BASE_FIELD_REPORTS;
+  const combinedReports = rawList.map((r, idx) => {
+    const isOffline = r.is_offline || r.status === 'Pending Sync' || r.sync_status === 'Pending Sync';
+    const syncStatus = r.sync_status || (isOffline ? 'Pending Sync' : 'Synced');
+    const verificationStatus = r.verification_status || (r.status === 'Verified' ? 'Verified' : isOffline ? 'Pending Sync' : (r.status || 'Pending Verification'));
+    
     return {
-      id: r.id || `FR-${String(i + 1).padStart(3, '0')}`,
+      id: r.id || r.report_id || `FR0${idx + 1}`,
       incident_type: r.incident_type || 'Road Hazard',
       severity: r.severity || 'Moderate',
-      location: loc,
-      affected_route: corridor,
-      raw_route: r.affected_route,
-      reporter_role: r.reporter_role || 'Field Officer',
-      created_at: createdAt,
-      time: formatRelativeTime(createdAt),
-      exact_time: formatExactDateTime(createdAt),
+      location: r.location || r.location_name || (r.affected_route === 'R001' ? 'Guwahati → Imphal' : 'Assam Sector'),
+      affected_route: r.affected_route === 'R001' ? 'Guwahati → Imphal' : r.affected_route === 'R002' ? 'Shillong → Silchar' : (r.affected_route || 'NH27 / NH2'),
+      reporter_role: r.reporter_role || r.reporter_id || 'Field Officer',
+      reporter_name: r.reporter_name || (r.reporter_id && r.reporter_id.split(' [')[0]) || 'Ground Officer',
+      reporter_phone: r.reporter_phone || '',
+      reporter_agency: r.reporter_agency || '',
+      reporter_badge: r.reporter_badge || '',
+      time: r.time || (r.created_at || r.timestamp ? formatTimeAgo(r.created_at || r.timestamp) : 'Recently'),
       sync_status: syncStatus,
       verification_status: verificationStatus,
-      description: r.description || 'Observed ground obstacle reported by patrol unit.',
+      description: r.description || '',
       latitude: r.latitude ? String(r.latitude) : '25.0000',
       longitude: r.longitude ? String(r.longitude) : '92.5000',
-      photo_url: r.photo_url || null
+      photo_url: r.photo_url || null,
+      created_at: r.created_at || r.timestamp
     };
   });
 
-  // Category counts calculated dynamically from actual report data
-  const totalCount = normalizedReports.length;
-  const pendingSyncCount = normalizedReports.filter(r => r.sync_status === 'Pending Sync').length;
-  const pendingVerificationCount = normalizedReports.filter(r => r.verification_status === 'Pending Verification' && r.sync_status !== 'Pending Sync').length;
-  const verifiedCount = normalizedReports.filter(r => r.verification_status === 'Verified').length;
+  // Dynamic counts derived from the complete reports dataset
+  const totalCount = combinedReports.length;
+  const pendingSyncCount = offlineQueueCount > 0 
+    ? offlineQueueCount 
+    : combinedReports.filter(r => r.sync_status === 'Pending Sync').length;
+  const pendingVerificationCount = combinedReports.filter(r => r.verification_status === 'Pending Verification').length;
+  const verifiedCount = combinedReports.filter(r => r.verification_status === 'Verified').length;
 
-  // Filter logic
-  const filteredReports = normalizedReports.filter(r => {
+  // Filter logic applied to the complete dataset
+  const filteredReports = combinedReports.filter(r => {
     // Tab filter
     if (activeTab === 'PENDING_SYNC' && r.sync_status !== 'Pending Sync') return false;
-    if (activeTab === 'PENDING_VERIFY' && (r.verification_status !== 'Pending Verification' || r.sync_status === 'Pending Sync')) return false;
+    if (activeTab === 'PENDING_VERIFY' && r.verification_status !== 'Pending Verification') return false;
     if (activeTab === 'VERIFIED' && r.verification_status !== 'Verified') return false;
 
     // Dropdown Filters
@@ -183,8 +173,7 @@ export default function FieldReports({
       const matchLoc = (r.location || '').toLowerCase().includes(q);
       const matchRoute = (r.affected_route || '').toLowerCase().includes(q);
       const matchRole = (r.reporter_role || '').toLowerCase().includes(q);
-      const matchDesc = (r.description || '').toLowerCase().includes(q);
-      return matchId || matchType || matchLoc || matchRoute || matchRole || matchDesc;
+      return matchId || matchType || matchLoc || matchRoute || matchRole;
     }
 
     return true;
@@ -228,34 +217,66 @@ export default function FieldReports({
       alert('Please enter a description for the hazard.');
       return;
     }
+    if (!reporterName.trim()) {
+      alert('Submitter Name is required to prevent anonymous / fraudulent submissions.');
+      return;
+    }
+    const cleanPhone = reporterPhone.replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 10) {
+      alert('A valid 10-digit contact mobile number is required to verify this report.');
+      return;
+    }
+    if (!declarationChecked) {
+      alert('You must accept the Anti-Malpractice declaration confirming this is a genuine hazard report.');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
+      let result = null;
       if (onSubmitReport) {
-        await onSubmitReport({
+        result = await onSubmitReport({
           incident_type: incidentType,
           description: description.trim(),
           severity,
           latitude,
           longitude,
           affected_route: affectedRoute,
-          location_name: locationName.trim(),
-          reporter_role: reporterRole,
+          reporter_name: reporterName.trim(),
+          reporter_phone: cleanPhone,
+          reporter_role: reporterCategory,
+          reporter_agency: reporterAgency.trim(),
+          reporter_badge: reporterBadgeId.trim(),
+          location_name: locationName || 'Assam Sector',
           photo_url: photoDataUrl
         });
       }
 
+      const isSynced = result?.synced === true;
+      const feedbackText = result?.message || (isOnline && isSynced
+        ? 'Hazard report successfully broadcast to Operations Center!'
+        : 'Report saved locally. It will sync when connection is restored.');
+
       setFeedbackMsg({
-        type: 'success',
-        text: isOnline ? 'Hazard report successfully broadcast to Operations Center!' : 'Report saved to local browser queue (Pending Sync)!'
+        type: isSynced ? 'success' : 'warning',
+        text: feedbackText
       });
 
       setDescription('');
       setPhotoDataUrl(null);
+      setDeclarationChecked(false);
+      if (!officialProfile) {
+        setReporterPhone('');
+      }
       setIsSubmitModalOpen(false);
       setTimeout(() => setFeedbackMsg(null), 6000);
     } catch (err) {
       console.error('Failed to submit report:', err);
+      setFeedbackMsg({
+        type: 'warning',
+        text: 'Report saved locally and will sync when connection is restored.'
+      });
+      setIsSubmitModalOpen(false);
     } finally {
       setIsSubmitting(false);
     }
@@ -291,6 +312,17 @@ export default function FieldReports({
 
         {/* Network status badges & demo offline toggle */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+          {/* Authority Privilege Indicator */}
+          {isAuthority ? (
+            <span className="pill-badge pill-green" style={{ padding: '5px 12px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '5px' }} title="Authority Privileges Active: You can verify and publish field reports">
+              <ShieldCheck size={13} /> Authority: Verification Active
+            </span>
+          ) : (
+            <span className="pill-badge pill-orange" style={{ padding: '5px 12px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '5px' }} title="Field Official Mode: Report submission enabled. Verification requires Authority login.">
+              <Lock size={13} /> Field Official: Verification Restricted
+            </span>
+          )}
+
           {isOnline ? (
             <span className="pill-badge pill-green" style={{ padding: '5px 12px', fontSize: '0.78rem' }}>
               <Wifi size={13} /> ONLINE
@@ -322,7 +354,18 @@ export default function FieldReports({
           {offlineQueueCount > 0 && isOnline && (
             <button
               type="button"
-              onClick={onSyncOfflineReports}
+              onClick={async () => {
+                if (onSyncOfflineReports) {
+                  const res = await onSyncOfflineReports();
+                  if (res?.syncedCount > 0) {
+                    setFeedbackMsg({
+                      type: 'success',
+                      text: `Successfully synced ${res.syncedCount} queued report(s) to Supabase!`
+                    });
+                    setTimeout(() => setFeedbackMsg(null), 5000);
+                  }
+                }
+              }}
               className="btn btn-primary btn-sm"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem' }}
             >
@@ -498,103 +541,91 @@ export default function FieldReports({
               </tr>
             </thead>
             <tbody>
-              {filteredReports.length === 0 ? (
-                <tr>
-                  <td colSpan="10" style={{ textAlign: 'center', padding: '2.5rem 1rem', color: '#64748b' }}>
-                    <FileSpreadsheet size={32} style={{ opacity: 0.4, margin: '0 auto 8px auto', display: 'block' }} />
-                    <strong style={{ display: 'block', fontSize: '0.9rem', color: 'var(--text-primary)' }}>No hazard reports match the selected filters</strong>
-                    <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
-                      Try adjusting your search query, status dropdown, or category tab.
-                    </span>
-                  </td>
-                </tr>
-              ) : (
-                filteredReports.map((r, idx) => {
-                  const isCrit = r.severity === 'Critical';
-                  const isHigh = r.severity === 'High';
-                  const isSynced = r.sync_status === 'Synced';
-                  const isVerified = r.verification_status === 'Verified';
+              {filteredReports.map((r, idx) => {
+                const isCrit = r.severity === 'Critical';
+                const isHigh = r.severity === 'High';
+                const isSynced = r.sync_status === 'Synced';
+                const isVerified = r.verification_status === 'Verified';
 
-                  return (
-                    <tr key={r.id || idx}>
-                      {/* Report ID */}
-                      <td>
-                        <strong style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-                          {r.id}
-                        </strong>
-                      </td>
+                return (
+                  <tr key={r.id || idx}>
+                    {/* Report ID */}
+                    <td>
+                      <strong style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                        {r.id}
+                      </strong>
+                    </td>
 
-                      {/* Incident Type */}
-                      <td>
-                        <strong style={{ color: 'var(--text-primary)' }}>{r.incident_type}</strong>
-                      </td>
+                    {/* Incident Type */}
+                    <td>
+                      <strong style={{ color: 'var(--text-primary)' }}>{r.incident_type}</strong>
+                    </td>
 
-                      {/* Severity */}
-                      <td>
-                        <span className={`pill-badge ${isCrit ? 'pill-red' : isHigh ? 'pill-orange' : 'pill-yellow'}`}>
-                          {r.severity}
-                        </span>
-                      </td>
+                    {/* Severity */}
+                    <td>
+                      <span className={`pill-badge ${isCrit ? 'pill-red' : isHigh ? 'pill-orange' : 'pill-yellow'}`}>
+                        {r.severity}
+                      </span>
+                    </td>
 
-                      {/* Location */}
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <MapPin size={13} color="#0284c7" />
-                          <span>{r.location}</span>
-                        </div>
-                      </td>
+                    {/* Location */}
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <MapPin size={13} color="#0284c7" />
+                        <span>{r.location}</span>
+                      </div>
+                    </td>
 
-                      {/* Affected Route */}
-                      <td>
-                        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{r.affected_route}</span>
-                      </td>
+                    {/* Affected Route */}
+                    <td>
+                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{r.affected_route}</span>
+                    </td>
 
-                      {/* Reported By */}
-                      <td>
-                        <span style={{ color: '#475569' }}>{r.reporter_role}</span>
-                      </td>
+                    {/* Reported By */}
+                    <td>
+                      <span style={{ color: '#475569' }}>{r.reporter_role}</span>
+                    </td>
 
-                      {/* Time */}
-                      <td title={r.exact_time}>
-                        <span style={{ color: '#64748b', fontSize: '0.8rem', cursor: 'default' }}>{r.time}</span>
-                      </td>
+                    {/* Time */}
+                    <td>
+                      <span style={{ color: '#64748b', fontSize: '0.8rem' }}>{r.time}</span>
+                    </td>
 
-                      {/* Sync Status */}
-                      <td>
-                        <span className={`pill-badge ${isSynced ? 'pill-green' : 'pill-orange'}`}>
-                          {r.sync_status}
-                        </span>
-                      </td>
+                    {/* Sync Status */}
+                    <td>
+                      <span className={`pill-badge ${isSynced ? 'pill-green' : 'pill-orange'}`}>
+                        {r.sync_status}
+                      </span>
+                    </td>
 
-                      {/* Verification Status */}
-                      <td>
-                        <span className={`pill-badge ${isVerified ? 'pill-green' : 'pill-yellow'}`}>
-                          {r.verification_status}
-                        </span>
-                      </td>
+                    {/* Verification Status */}
+                    <td>
+                      <span className={`pill-badge ${isVerified ? 'pill-green' : 'pill-yellow'}`}>
+                        {r.verification_status}
+                      </span>
+                    </td>
 
-                      {/* Actions */}
-                      <td style={{ textAlign: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                          <button
-                            onClick={() => setSelectedReport(r)}
-                            className="btn-ref-view"
-                          >
-                            View
-                          </button>
-                          <button
-                            onClick={() => setSelectedReport(r)}
-                            className="btn-ref-more"
-                            title="Options"
-                          >
-                            <MoreVertical size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
+                    {/* Actions */}
+                    <td style={{ textAlign: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                        <button
+                          onClick={() => setSelectedReport(r)}
+                          className="btn-ref-view"
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => setSelectedReport(r)}
+                          className="btn-ref-more"
+                          title="Options"
+                        >
+                          <MoreVertical size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -623,7 +654,7 @@ export default function FieldReports({
                     {selectedReport.id} • {selectedReport.incident_type}
                   </h3>
                   <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                    {selectedReport.time} ({selectedReport.exact_time}) • Reported by: {selectedReport.reporter_role}
+                    {selectedReport.time} • Reported by: {selectedReport.reporter_role}
                   </span>
                 </div>
               </div>
@@ -670,6 +701,80 @@ export default function FieldReports({
                 </div>
               </div>
 
+              {/* Submitter Identification & Verification Contact Details */}
+              <div style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+                padding: '0.85rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <UserCheck size={16} color="#0284c7" />
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase' }}>
+                      Submitter Identification &amp; Contact
+                    </span>
+                  </div>
+                  <span className="pill-badge pill-blue" style={{ fontSize: '0.7rem' }}>
+                    Anti-Malpractice Traceable
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.6rem', fontSize: '0.82rem' }}>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '0.72rem', display: 'block' }}>Submitter Name:</span>
+                    <strong style={{ color: 'var(--text-primary)' }}>
+                      {selectedReport.reporter_name || selectedReport.reporter_role || 'Ground Officer'}
+                    </strong>
+                  </div>
+
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '0.72rem', display: 'block' }}>Role / Category:</span>
+                    <span style={{ color: '#334155', fontWeight: 500 }}>
+                      {selectedReport.reporter_role || 'Field Officer'}
+                    </span>
+                  </div>
+
+                  {selectedReport.reporter_phone && (
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '0.72rem', display: 'block' }}>Contact Phone:</span>
+                      <a 
+                        href={`tel:${selectedReport.reporter_phone}`}
+                        style={{ 
+                          color: '#0284c7', 
+                          fontWeight: 600, 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: '4px',
+                          textDecoration: 'none'
+                        }}
+                        title="Click to call ground reporter for live verification"
+                        id="link-call-submitter"
+                      >
+                        <Phone size={13} /> {selectedReport.reporter_phone}
+                      </a>
+                    </div>
+                  )}
+
+                  {selectedReport.reporter_agency && (
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '0.72rem', display: 'block' }}>Department / Agency:</span>
+                      <span style={{ color: '#334155' }}>{selectedReport.reporter_agency}</span>
+                    </div>
+                  )}
+
+                  {selectedReport.reporter_badge && (
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '0.72rem', display: 'block' }}>Badge / Govt ID:</span>
+                      <span style={{ color: '#334155', fontFamily: 'var(--font-mono)' }}>{selectedReport.reporter_badge}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <span className={`pill-badge ${selectedReport.sync_status === 'Synced' ? 'pill-green' : 'pill-orange'}`}>
                   Sync: {selectedReport.sync_status}
@@ -688,19 +793,54 @@ export default function FieldReports({
                 Close
               </button>
               {selectedReport.verification_status !== 'Verified' && (
-                <button
-                  onClick={async () => {
-                    if (onVerifyReport) {
-                      await onVerifyReport(selectedReport.id);
-                    }
-                    setSelectedReport({ ...selectedReport, verification_status: 'Verified', sync_status: 'Synced' });
-                  }}
-                  className="btn btn-primary btn-sm"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                >
-                  <CheckCircle size={14} />
-                  Verify &amp; Publish to Map
-                </button>
+                isAuthority ? (
+                  <button
+                    onClick={() => handleVerify(selectedReport.id)}
+                    className="btn btn-primary btn-sm"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#0284c7' }}
+                    id="btn-verify-report"
+                  >
+                    <CheckCircle size={14} />
+                    <span>Verify &amp; Publish to Map (Authority)</span>
+                  </button>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <div style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      fontSize: '0.73rem',
+                      color: '#b45309',
+                      background: '#fffbeb',
+                      border: '1px solid #fde68a',
+                      padding: '3px 8px',
+                      borderRadius: '6px',
+                      fontWeight: 500
+                    }}>
+                      <Lock size={12} />
+                      <span>Authority Verification Required</span>
+                    </div>
+                    <button
+                      disabled
+                      className="btn btn-sm"
+                      style={{
+                        opacity: 0.6,
+                        cursor: 'not-allowed',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        background: '#e2e8f0',
+                        color: '#64748b',
+                        border: '1px solid #cbd5e1'
+                      }}
+                      title="Only Disaster Authority personnel can verify field reports. Field officials can submit and view only."
+                      id="btn-verify-disabled"
+                    >
+                      <Lock size={13} />
+                      <span>Verify (Authority Only)</span>
+                    </button>
+                  </div>
+                )
               )}
             </div>
           </div>
@@ -894,14 +1034,146 @@ export default function FieldReports({
                   </div>
                 </div>
 
-                <div>
-                  <label className="form-label">Reporter Designation / Role</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={reporterRole}
-                    onChange={(e) => setReporterRole(e.target.value)}
-                  />
+                {/* Submitter Verification & Accountability Section (Anti-Malpractice) */}
+                <div style={{
+                  background: '#f8fafc',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '8px',
+                  padding: '0.85rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.75rem'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <UserCheck size={16} color="#0284c7" />
+                      <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        Submitter Identification (Anti-Malpractice Verification)
+                      </span>
+                    </div>
+                    {officialProfile ? (
+                      <span className="pill-badge pill-green" style={{ fontSize: '0.7rem' }}>
+                        <ShieldCheck size={11} /> Verified Account
+                      </span>
+                    ) : (
+                      <span className="pill-badge pill-orange" style={{ fontSize: '0.7rem' }}>
+                        Identity Validation Required
+                      </span>
+                    )}
+                  </div>
+                  
+                  <p style={{ margin: 0, fontSize: '0.75rem', color: '#64748b', lineHeight: 1.4 }}>
+                    To prevent false alarms, traffic diversions, and fraudulent claims, submitter contact details are logged and cross-referenced by authorities.
+                  </p>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div>
+                      <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        Full Name <span style={{ color: '#dc2626' }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={reporterName}
+                        onChange={(e) => setReporterName(e.target.value)}
+                        placeholder="e.g. Ramesh Chandra / Officer Sharma"
+                        required
+                        id="input-reporter-name"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        Contact Mobile / Phone <span style={{ color: '#dc2626' }}>*</span>
+                      </label>
+                      <input
+                        type="tel"
+                        className="form-input"
+                        value={reporterPhone}
+                        onChange={(e) => setReporterPhone(e.target.value)}
+                        placeholder="e.g. 9876543210 (10 digits)"
+                        required
+                        id="input-reporter-phone"
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+                    <div>
+                      <label className="form-label">Submitter Role</label>
+                      <select
+                        className="form-select"
+                        value={reporterCategory}
+                        onChange={(e) => setReporterCategory(e.target.value)}
+                        id="select-reporter-category"
+                      >
+                        <option value="Field Officer / Highway Patrol">Field Officer / Highway Patrol</option>
+                        <option value="Disaster Authority Officer">Disaster Authority Officer</option>
+                        <option value="Police / Traffic Warden">Police / Traffic Warden</option>
+                        <option value="NDRF / SDRF Personnel">NDRF / SDRF Personnel</option>
+                        <option value="Truck Driver / Commercial Fleet">Truck Driver / Commercial Fleet</option>
+                        <option value="Local Citizen / Verified Resident">Local Citizen / Verified Resident</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="form-label">Agency / Department</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={reporterAgency}
+                        onChange={(e) => setReporterAgency(e.target.value)}
+                        placeholder="e.g. NHAI / Assam Police / Citizen"
+                        id="input-reporter-agency"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="form-label">Official Badge / Govt ID</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={reporterBadgeId}
+                        onChange={(e) => setReporterBadgeId(e.target.value)}
+                        placeholder="e.g. OFC-7842 / Aadhaar/DL"
+                        id="input-reporter-badge"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Statutory Anti-Malpractice Warning & Checkbox */}
+                  <div style={{
+                    background: '#fffbeb',
+                    border: '1px solid #fef3c7',
+                    borderRadius: '6px',
+                    padding: '0.65rem 0.75rem',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.5rem',
+                    marginTop: '2px'
+                  }}>
+                    <AlertTriangle size={16} color="#d97706" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={{ fontSize: '0.74rem', color: '#92400e', fontWeight: 600 }}>
+                        Statutory Anti-Malpractice Notice (Section 54, Disaster Management Act, 2005)
+                      </span>
+                      <span style={{ fontSize: '0.71rem', color: '#b45309', lineHeight: 1.35 }}>
+                        Submitting false or malicious disaster warnings to divert traffic or cause panic is punishable by up to 1 year imprisonment and heavy fines.
+                      </span>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={declarationChecked}
+                          onChange={(e) => setDeclarationChecked(e.target.checked)}
+                          required
+                          id="chk-anti-malpractice-declaration"
+                        />
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#78350f' }}>
+                          I hereby declare that this report represents an actual, observed ground hazard.
+                        </span>
+                      </label>
+                    </div>
+                  </div>
                 </div>
               </div>
 

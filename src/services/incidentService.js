@@ -7,106 +7,15 @@
  * - Marks offline reports as "Pending Sync".
  * - Auto-synchronizes with Supabase when online connectivity is restored,
  *   updating status to "Pending Verification".
+ * - Comprehensive error handling with non-silent recovery.
  */
 
-import { DEMO_INCIDENTS } from '../data/demoIncidents';
-import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { DEMO_INCIDENTS } from '../data/demoIncidents.js';
+import { BASE_FIELD_REPORTS } from '../data/baselineReports.js';
+import { supabase, isSupabaseConfigured } from './supabaseClient.js';
 
 const STORAGE_KEY_REPORTS = 'ner_field_reports_cache';
 const STORAGE_KEY_QUEUE = 'ner_offline_field_reports_queue';
-
-const INITIAL_FIELD_REPORTS = [
-  {
-    id: 'FR-001',
-    incident_type: 'Landslide / Mudflow',
-    description: 'Major rock and mudslide blocking eastbound lane near Sonapur cutting.',
-    severity: 'Critical',
-    latitude: 25.0640,
-    longitude: 92.3610,
-    affected_route: 'R002',
-    location_name: 'Sonapur, Assam',
-    reporter_role: 'Field Officer',
-    status: 'Pending Verification',
-    photo_url: null,
-    created_at: new Date(Date.now() - 10 * 60000).toISOString(),
-    is_offline: false
-  },
-  {
-    id: 'FR-002',
-    incident_type: 'Road Blockage',
-    description: 'Bridge approach damaged by rising water levels; light vehicles restricted.',
-    severity: 'High',
-    latitude: 24.7980,
-    longitude: 93.1230,
-    affected_route: 'R001',
-    location_name: 'Jiribam, Manipur',
-    reporter_role: 'Volunteer',
-    status: 'Pending Sync',
-    photo_url: null,
-    created_at: new Date(Date.now() - 65 * 60000).toISOString(),
-    is_offline: true
-  },
-  {
-    id: 'FR-003',
-    incident_type: 'Heavy Rainfall',
-    description: 'Inundation on lower highway stretch; speed reduced to 20 km/h.',
-    severity: 'High',
-    latitude: 24.2250,
-    longitude: 92.6780,
-    affected_route: 'R003',
-    location_name: 'Kolasib, Mizoram',
-    reporter_role: 'Field Officer',
-    status: 'Verified',
-    photo_url: null,
-    created_at: new Date(Date.now() - 180 * 60000).toISOString(),
-    is_offline: false
-  },
-  {
-    id: 'FR-004',
-    incident_type: 'Debris on Road',
-    description: 'Scattered boulders and branches across road following hill storm.',
-    severity: 'Medium',
-    latitude: 24.8330,
-    longitude: 92.7780,
-    affected_route: 'R002',
-    location_name: 'Silchar, Assam',
-    reporter_role: 'Volunteer',
-    status: 'Pending Verification',
-    photo_url: null,
-    created_at: new Date(Date.now() - 300 * 60000).toISOString(),
-    is_offline: false
-  },
-  {
-    id: 'FR-005',
-    incident_type: 'Mud Accumulation',
-    description: 'Citizen report: 2 feet mud buildup near Nungba curve. Heavy vehicles slipping.',
-    severity: 'Moderate',
-    latitude: 24.7800,
-    longitude: 93.3100,
-    affected_route: 'R001',
-    location_name: 'Nungba Corridor, Manipur',
-    reporter_role: 'Local Transport Union Driver',
-    status: 'Verified',
-    photo_url: null,
-    created_at: new Date(Date.now() - 420 * 60000).toISOString(),
-    is_offline: false
-  },
-  {
-    id: 'FR-006',
-    incident_type: 'Tree Fall & Power Cable Obstruction',
-    description: 'Field volunteer report: Heavy eucalyptus branch down over single lane NH6 approach.',
-    severity: 'High',
-    latitude: 25.2000,
-    longitude: 92.3100,
-    affected_route: 'R002',
-    location_name: 'Jowai Bypass, Meghalaya',
-    reporter_role: 'District Disaster Volunteer',
-    status: 'Pending Verification',
-    photo_url: null,
-    created_at: new Date(Date.now() - 720 * 60000).toISOString(),
-    is_offline: false
-  }
-];
 
 class IncidentServiceManager {
   constructor() {
@@ -117,6 +26,7 @@ class IncidentServiceManager {
     // Load persisted reports and offline queue from localStorage
     this.fieldReports = this.loadStoredReports();
     this.offlineQueue = this.loadOfflineQueue();
+    this.syncIncidentsFromFieldReports();
 
     // Listen to browser network changes
     if (typeof window !== 'undefined') {
@@ -132,38 +42,87 @@ class IncidentServiceManager {
     this.fetchRemoteReports();
   }
 
+  /**
+   * Synchronizes active incidents from fieldReports while preserving baseline demo incidents
+   */
+  syncIncidentsFromFieldReports() {
+    const baseIncidents = [...DEMO_INCIDENTS];
+    const baseIds = new Set(baseIncidents.map(i => i.id));
+    const derived = [];
+
+    for (const r of this.fieldReports) {
+      const incId = `INC-${r.report_id || r.id}`;
+      if (baseIds.has(incId) || baseIds.has(r.id) || derived.some(d => d.id === incId || d.id === r.id)) {
+        continue;
+      }
+
+      derived.push({
+        id: incId,
+        report_id: r.report_id || r.id,
+        type: r.incident_type || 'Road Hazard',
+        incident_type: r.incident_type || 'Road Hazard',
+        severity: r.severity || 'Moderate',
+        latitude: parseFloat(r.latitude) || 25.0,
+        longitude: parseFloat(r.longitude) || 92.5,
+        description: r.description || 'Observed ground hazard.',
+        affected_route: r.affected_route || 'R001',
+        location_name: r.location || r.location_name || 'Corridor Sector',
+        timestamp: r.created_at || r.timestamp || new Date().toISOString(),
+        status: r.status === 'Verified' ? 'Verified Hazard' : 'Active Ground Report',
+        verification_status: r.verification_status || r.status || 'Pending Verification',
+        reported_by: r.reporter_name || r.reporter_role || r.reporter_id || 'Field Reporter',
+        reporter_phone: r.reporter_phone || '',
+        reporter_agency: r.reporter_agency || '',
+        is_demo: false,
+        is_field_report: true,
+        estimated_clearance_hours: r.severity === 'Critical' ? 12.0 : r.severity === 'High' ? 6.0 : 3.0
+      });
+    }
+
+    this.incidents = [...derived, ...baseIncidents];
+  }
+
   async fetchRemoteReports() {
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase.from('field_reports').select('*').order('created_at', { ascending: false });
+        const { data, error } = await supabase
+          .from('field_reports')
+          .select('*')
+          .order('created_at', { ascending: false });
+
         if (data && !error && data.length > 0) {
           const remoteNormalized = data.map(r => ({
             id: r.report_id || `FR-${r.id}`,
+            report_id: r.report_id || `FR-${r.id}`,
             incident_type: r.incident_type,
             description: r.description,
             severity: r.severity || 'Moderate',
             latitude: parseFloat(r.latitude) || 25.0,
             longitude: parseFloat(r.longitude) || 92.5,
+            location: r.affected_route === 'R001' ? 'Guwahati → Imphal Corridor' : 'Northeast Corridor',
             affected_route: r.affected_route || 'R001',
-            location_name: r.location_name || r.location || '',
-            reporter_role: r.reporter_role || r.reporter_id || 'Citizen Reporter',
+            reporter_role: r.reporter_id || 'Citizen Reporter',
+            reporter_id: r.reporter_id || 'Citizen Reporter',
             status: r.status || 'Pending Verification',
+            sync_status: 'Synced',
+            verification_status: r.status || 'Pending Verification',
             photo_url: r.photo_url || null,
             created_at: r.created_at || r.timestamp || new Date().toISOString(),
+            timestamp: r.timestamp || r.created_at || new Date().toISOString(),
             is_offline: false
           }));
 
-          // Keep un-synced offline reports at the top
-          const offlineReports = this.fieldReports.filter(r => r.status === 'Pending Sync' || r.is_offline);
-          const remoteIds = new Set(remoteNormalized.map(r => r.id));
-          const uniqueOffline = offlineReports.filter(r => !remoteIds.has(r.id));
-
-          this.fieldReports = [...uniqueOffline, ...remoteNormalized];
-          this.saveState();
-          this.notifySubscribers();
+          const existingIds = new Set(this.fieldReports.map(fr => fr.id));
+          const newRemote = remoteNormalized.filter(r => !existingIds.has(r.id) && !existingIds.has(r.report_id));
+          if (newRemote.length > 0) {
+            this.fieldReports = [...newRemote, ...this.fieldReports];
+            this.syncIncidentsFromFieldReports();
+            this.saveState();
+            this.notifySubscribers();
+          }
         }
       } catch (err) {
-        console.warn('Could not fetch remote field reports:', err);
+        console.warn('Could not fetch remote field reports:', err.message || err);
       }
     }
   }
@@ -173,18 +132,18 @@ class IncidentServiceManager {
       const stored = localStorage.getItem(STORAGE_KEY_REPORTS);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map(r => ({
-            ...r,
-            location_name: r.location_name || r.location || (r.affected_route === 'R001' ? 'Jiribam, Manipur' : 'Sonapur, Assam'),
-            created_at: r.created_at || new Date().toISOString()
-          }));
+        if (Array.isArray(parsed) && parsed.length >= BASE_FIELD_REPORTS.length) {
+          return parsed;
+        } else if (Array.isArray(parsed) && parsed.length > 0) {
+          const baseIds = new Set(BASE_FIELD_REPORTS.map(b => b.id));
+          const customReports = parsed.filter(p => !baseIds.has(p.id) && !baseIds.has(p.report_id));
+          return [...customReports, ...BASE_FIELD_REPORTS];
         }
       }
     } catch (e) {
       console.warn('Could not read cached field reports:', e);
     }
-    return [...INITIAL_FIELD_REPORTS];
+    return [...BASE_FIELD_REPORTS];
   }
 
   loadOfflineQueue() {
@@ -199,7 +158,7 @@ class IncidentServiceManager {
     } catch (e) {
       console.warn('Could not read offline queue:', e);
     }
-    return INITIAL_FIELD_REPORTS.filter(r => r.status === 'Pending Sync' || r.is_offline);
+    return [];
   }
 
   saveState() {
@@ -240,72 +199,112 @@ class IncidentServiceManager {
     return this.offlineQueue.length;
   }
 
+  /**
+   * Adds a field report. If online and Supabase is configured, attempts direct insert.
+   * If insert fails or offline, saves locally and enqueues to offline queue for pending sync.
+   */
   async addFieldReport(reportData) {
     const isCurrentlyOnline = this.isOnline();
-    const status = isCurrentlyOnline ? 'Pending Verification' : 'Pending Sync';
+    const canAttemptRemote = isCurrentlyOnline && isSupabaseConfigured && Boolean(supabase);
 
-    const timestamp = new Date().toISOString();
+    const reportId = `FR-${Date.now().toString().slice(-4)}`;
+    let status = canAttemptRemote ? 'Pending Verification' : 'Pending Sync';
+    let isOffline = !canAttemptRemote;
+    let synced = false;
+    let feedbackMessage = '';
+
     const newReport = {
-      id: `FR-${Date.now().toString().slice(-5)}`,
+      id: reportId,
+      report_id: reportId,
       incident_type: reportData.incident_type || 'Road Hazard',
       description: reportData.description || 'Observed route disruption.',
       severity: reportData.severity || 'Moderate',
       latitude: parseFloat(reportData.latitude) || 26.1445,
       longitude: parseFloat(reportData.longitude) || 91.7362,
+      location: reportData.location_name || reportData.location || 'Assam Sector',
       affected_route: reportData.affected_route || 'R001',
-      location_name: reportData.location_name || (reportData.affected_route === 'R001' ? 'Jiribam, Manipur' : 'Sonapur, Assam'),
-      reporter_role: reportData.reporter_role || 'Field Reporter / Volunteer',
+      reporter_name: reportData.reporter_name || reportData.reporter_id || 'Field Reporter',
+      reporter_phone: reportData.reporter_phone || '',
+      reporter_role: reportData.reporter_role || 'Field Officer',
+      reporter_agency: reportData.reporter_agency || '',
+      reporter_id: reportData.reporter_id || reportData.reporter_name || 'Ground Unit',
       status: status,
+      sync_status: canAttemptRemote ? 'Synced' : 'Pending Sync',
+      verification_status: status,
       photo_url: reportData.photo_url || null,
-      created_at: timestamp,
-      is_offline: !isCurrentlyOnline
+      created_at: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
+      is_offline: isOffline
     };
 
-    if (!isCurrentlyOnline) {
-      // OFFLINE MODE: Save to local offline queue and local store
-      this.offlineQueue = [newReport, ...this.offlineQueue];
-      this.fieldReports = [newReport, ...this.fieldReports];
-      this.saveState();
-      this.notifySubscribers();
-      return { report: newReport, wasOffline: true };
-    }
-
-    // ONLINE MODE: Attempt Supabase sync directly
-    if (isSupabaseConfigured && supabase) {
+    if (canAttemptRemote) {
+      // ONLINE MODE: Attempt Supabase sync directly
       try {
+        const reporterFormatted = newReport.reporter_phone
+          ? `${newReport.reporter_name} [Tel: ${newReport.reporter_phone}] (${newReport.reporter_role})`
+          : `${newReport.reporter_name} (${newReport.reporter_role})`;
+
         const dbPayload = {
-          report_id: newReport.id,
+          report_id: newReport.report_id,
           incident_type: newReport.incident_type,
           description: newReport.description,
           severity: newReport.severity,
           latitude: newReport.latitude,
           longitude: newReport.longitude,
           affected_route: newReport.affected_route,
-          location_name: newReport.location_name,
-          reporter_role: newReport.reporter_role,
-          reporter_id: newReport.reporter_role,
-          photo_url: newReport.photo_url || null,
-          status: newReport.status
+          reporter_id: reporterFormatted,
+          photo_url: newReport.photo_url,
+          status: 'Pending Verification',
+          timestamp: newReport.created_at
         };
-        const { data, error } = await supabase.from('field_reports').insert([dbPayload]).select();
+
+        const { error } = await supabase.from('field_reports').insert([dbPayload]);
         if (error) {
-          console.warn('Notice: Supabase field_reports table query returned:', error.message);
-        } else if (data && data.length > 0) {
-          const inserted = data[0];
-          newReport.id = inserted.report_id || `FR-${inserted.id}`;
-          if (inserted.created_at) {
-            newReport.created_at = inserted.created_at;
-          }
+          // Log Supabase error message without exposing credentials
+          console.error('Supabase insert failed:', error.message || error);
+          // Fall back gracefully to offline queue
+          newReport.status = 'Pending Sync';
+          newReport.sync_status = 'Pending Sync';
+          newReport.verification_status = 'Pending Sync';
+          newReport.is_offline = true;
+          this.offlineQueue = [newReport, ...this.offlineQueue];
+          feedbackMessage = 'Unable to sync report. Saved locally and will sync when connection is restored.';
+        } else {
+          synced = true;
+          feedbackMessage = 'Hazard report successfully broadcast to Operations Center!';
         }
       } catch (err) {
-        console.warn('Supabase insert failed, preserved locally:', err);
+        console.error('Supabase connection exception during insert:', err.message || err);
+        newReport.status = 'Pending Sync';
+        newReport.sync_status = 'Pending Sync';
+        newReport.verification_status = 'Pending Sync';
+        newReport.is_offline = true;
+        this.offlineQueue = [newReport, ...this.offlineQueue];
+        feedbackMessage = 'Unable to sync report. Saved locally and will sync when connection is restored.';
       }
+    } else {
+      // OFFLINE MODE OR SUPABASE NOT CONFIGURED
+      newReport.status = 'Pending Sync';
+      newReport.sync_status = 'Pending Sync';
+      newReport.verification_status = 'Pending Sync';
+      newReport.is_offline = true;
+      this.offlineQueue = [newReport, ...this.offlineQueue];
+      feedbackMessage = 'Report saved locally. It will sync when connection is restored.';
     }
 
+    // Prepend to fieldReports and update incident model
     this.fieldReports = [newReport, ...this.fieldReports];
+    this.syncIncidentsFromFieldReports();
     this.saveState();
     this.notifySubscribers();
-    return { report: newReport, wasOffline: false };
+
+    return {
+      success: true,
+      report: newReport,
+      synced,
+      wasOffline: newReport.is_offline,
+      message: feedbackMessage
+    };
   }
 
   /**
@@ -316,73 +315,129 @@ class IncidentServiceManager {
       return { syncedCount: 0 };
     }
 
-    const toSync = [...this.offlineQueue];
-    let syncedCount = 0;
-
-    for (const report of toSync) {
-      if (isSupabaseConfigured && supabase) {
-        try {
-          const dbPayload = {
-            report_id: report.id,
-            incident_type: report.incident_type,
-            description: report.description,
-            severity: report.severity,
-            latitude: report.latitude,
-            longitude: report.longitude,
-            affected_route: report.affected_route,
-            location_name: report.location_name || '',
-            reporter_role: report.reporter_role || 'Volunteer',
-            reporter_id: report.reporter_role || 'Volunteer',
-            photo_url: report.photo_url || null,
-            status: 'Pending Verification'
-          };
-          await supabase.from('field_reports').insert([dbPayload]);
-        } catch (err) {
-          console.warn('Supabase sync notice for report', report.id, err);
-        }
-      }
-
-      // Transition status from "Pending Sync" to "Pending Verification"
-      this.fieldReports = this.fieldReports.map(fr => 
-        fr.id === report.id ? { ...fr, status: 'Pending Verification', is_offline: false } : fr
-      );
-      syncedCount++;
+    if (!isSupabaseConfigured || !supabase) {
+      console.warn('Notice: Supabase is not configured yet. Offline reports remain queued locally.');
+      return { syncedCount: 0 };
     }
 
-    // Clear the offline queue
-    this.offlineQueue = [];
+    const remainingQueue = [];
+    let syncedCount = 0;
+
+    for (const report of this.offlineQueue) {
+      try {
+        const dbPayload = {
+          report_id: report.report_id || report.id,
+          incident_type: report.incident_type,
+          description: report.description,
+          severity: report.severity,
+          latitude: report.latitude,
+          longitude: report.longitude,
+          affected_route: report.affected_route,
+          reporter_id: report.reporter_id || report.reporter_role || 'Volunteer',
+          photo_url: report.photo_url || null,
+          status: 'Pending Verification',
+          timestamp: report.created_at || report.timestamp || new Date().toISOString()
+        };
+
+        const { error } = await supabase.from('field_reports').upsert([dbPayload], { onConflict: 'report_id' });
+        if (error && error.code !== '23505') {
+          console.error(`Supabase sync notice for report ${report.id}:`, error.message || error);
+          remainingQueue.push(report);
+        } else {
+          // Successfully synced to Supabase (or already synced)
+          this.fieldReports = this.fieldReports.map(fr => 
+            fr.id === report.id 
+              ? { 
+                  ...fr, 
+                  status: 'Pending Verification', 
+                  sync_status: 'Synced', 
+                  verification_status: 'Pending Verification', 
+                  is_offline: false 
+                } 
+              : fr
+          );
+          syncedCount++;
+        }
+      } catch (err) {
+        console.error(`Supabase sync connection exception for report ${report.id}:`, err.message || err);
+        remainingQueue.push(report);
+      }
+    }
+
+    this.offlineQueue = remainingQueue;
+    this.syncIncidentsFromFieldReports();
     this.saveState();
     this.notifySubscribers();
     return { syncedCount };
-  }
-
-  /**
-   * Updates report status to 'Verified' and persists
-   */
-  async verifyReport(reportId) {
-    this.fieldReports = this.fieldReports.map(fr => 
-      fr.id === reportId ? { ...fr, status: 'Verified', is_offline: false } : fr
-    );
-    this.saveState();
-    this.notifySubscribers();
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const numericId = parseInt(String(reportId).replace(/\D/g, ''), 10);
-        await supabase
-          .from('field_reports')
-          .update({ status: 'Verified' })
-          .or(`report_id.eq.${reportId},id.eq.${numericId}`);
-      } catch (err) {
-        console.warn('Supabase update notice for verify report:', err);
-      }
-    }
   }
 
   handleNetworkOnline() {
     if (!this.simulatedOffline) {
       this.syncOfflineReports();
     }
+  }
+
+  /**
+   * Authority-only verification of a field hazard report
+   */
+  async verifyReport(reportId, verifiedBy = 'Disaster Authority Command') {
+    let updatedReport = null;
+    const nowIso = new Date().toISOString();
+
+    // 1. Update in active fieldReports list
+    this.fieldReports = this.fieldReports.map(fr => {
+      if (fr.id === reportId || fr.report_id === reportId) {
+        updatedReport = {
+          ...fr,
+          status: 'Verified',
+          verification_status: 'Verified',
+          verified_by: verifiedBy,
+          verified_at: nowIso
+        };
+        return updatedReport;
+      }
+      return fr;
+    });
+
+    // 2. Also update in offline queue if it was queued
+    this.offlineQueue = this.offlineQueue.map(q => {
+      if (q.id === reportId || q.report_id === reportId) {
+        return {
+          ...q,
+          status: 'Verified',
+          verification_status: 'Verified',
+          verified_by: verifiedBy,
+          verified_at: nowIso
+        };
+      }
+      return q;
+    });
+
+    // 3. Sync verification to remote Supabase database if configured
+    if (isSupabaseConfigured && supabase && updatedReport) {
+      try {
+        const { error } = await supabase
+          .from('field_reports')
+          .update({ status: 'Verified' })
+          .or(`id.eq.${reportId},report_id.eq.${reportId}`);
+
+        if (error) {
+          console.warn('Notice updating report status in Supabase:', error.message);
+        }
+      } catch (err) {
+        console.warn('Exception updating report status in Supabase:', err);
+      }
+    }
+
+    // 4. Update incident status, save state & notify all subscribers (Dashboard, FieldReports, Map, etc.)
+    this.syncIncidentsFromFieldReports();
+    this.saveState();
+    this.notifySubscribers();
+
+    return {
+      success: true,
+      report: updatedReport
+    };
   }
 
   subscribe(callback) {

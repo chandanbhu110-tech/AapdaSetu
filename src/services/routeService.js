@@ -7,15 +7,18 @@ import { DEMO_INCIDENTS } from '../data/demoIncidents';
 import { calculateRouteHealthScore } from '../utils/routeHealth';
 import { calculateWeatherRisk } from '../utils/weatherRisk';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { incidentService } from './incidentService';
 
-export function getAllRoutes(weatherMap = {}) {
+export function getAllRoutes(weatherMap = {}, activeIncidents = null) {
+  const allIncidents = activeIncidents || (incidentService?.getIncidents ? incidentService.getIncidents() : DEMO_INCIDENTS);
+
   return DEMO_ROUTES.map(route => {
     // Determine incidents affecting this route
-    const routeIncidents = DEMO_INCIDENTS.filter(inc => inc.affected_route === route.id);
+    const routeIncidents = allIncidents.filter(inc => inc.affected_route === route.id);
     const incidentCount = routeIncidents.length;
     let maxSeverity = 0;
     routeIncidents.forEach(inc => {
-      const sMap = { 'Low': 1, 'Moderate': 2, 'High': 3, 'Critical': 4 };
+      const sMap = { 'Low': 1, 'Moderate': 2, 'Medium': 2, 'High': 3, 'Critical': 4 };
       if ((sMap[inc.severity] || 0) > maxSeverity) {
         maxSeverity = sMap[inc.severity];
       }
@@ -52,16 +55,18 @@ export function getAllRoutes(weatherMap = {}) {
 /**
  * Fetch and enrich routes from Supabase when database credentials exist
  */
-export async function fetchLiveRoutesFromSupabase(weatherMap = {}) {
+export async function fetchLiveRoutesFromSupabase(weatherMap = {}, activeIncidents = null) {
   if (!isSupabaseConfigured || !supabase) {
-    return getAllRoutes(weatherMap);
+    return getAllRoutes(weatherMap, activeIncidents);
   }
+
+  const allIncidents = activeIncidents || (incidentService?.getIncidents ? incidentService.getIncidents() : DEMO_INCIDENTS);
 
   try {
     const { data, error } = await supabase.from('routes').select('*');
     if (error || !data || data.length === 0) {
       console.warn('Supabase routes query empty or error, using baseline demo routes:', error);
-      return getAllRoutes(weatherMap);
+      return getAllRoutes(weatherMap, activeIncidents);
     }
 
     return data.map(dbRoute => {
@@ -76,12 +81,20 @@ export async function fetchLiveRoutesFromSupabase(weatherMap = {}) {
       const weatherRiskDest = calculateWeatherRisk(destWeather).riskScore;
       const combinedWeatherRisk = Math.max(weatherRiskOrigin, weatherRiskDest);
 
-      const routeIncidents = DEMO_INCIDENTS.filter(inc => inc.affected_route === routeId);
+      const routeIncidents = allIncidents.filter(inc => inc.affected_route === routeId);
+      let maxSeverity = 0;
+      routeIncidents.forEach(inc => {
+        const sMap = { 'Low': 1, 'Moderate': 2, 'Medium': 2, 'High': 3, 'Critical': 4 };
+        if ((sMap[inc.severity] || 0) > maxSeverity) {
+          maxSeverity = sMap[inc.severity];
+        }
+      });
+
       const healthResult = calculateRouteHealthScore({
         roadConditionScore: dbRoute.health_score || demoMatch.baseline_health_score,
         weatherRiskScore: combinedWeatherRisk,
         incidentCount: routeIncidents.length,
-        incidentSeverity: routeIncidents.length > 0 ? 3 : 0
+        incidentSeverity: maxSeverity
       });
 
       return {
@@ -105,11 +118,11 @@ export async function fetchLiveRoutesFromSupabase(weatherMap = {}) {
     });
   } catch (err) {
     console.warn('Failed to load routes from Supabase, using local fallback:', err);
-    return getAllRoutes(weatherMap);
+    return getAllRoutes(weatherMap, activeIncidents);
   }
 }
 
-export function getRouteById(routeId, weatherMap = {}) {
-  const routes = getAllRoutes(weatherMap);
+export function getRouteById(routeId, weatherMap = {}, activeIncidents = null) {
+  const routes = getAllRoutes(weatherMap, activeIncidents);
   return routes.find(r => r.id === routeId) || routes[0];
 }

@@ -4,9 +4,19 @@ import L from 'leaflet';
 import { Truck, AlertTriangle, Building, FileText, CheckCircle } from 'lucide-react';
 import RouteMapLegend from './RouteMapLegend';
 
-// NER Core Regional Center: between Assam, Meghalaya, and Manipur
-const NER_CENTER = [25.80, 92.60];
+// North Eastern Region (NER) Geographic Bounds:
+// Covers Assam, Arunachal Pradesh, Manipur, Meghalaya, Mizoram, Nagaland, Sikkim, and Tripura
+// with an operational buffer (from 20.5°N to 30.5°N and 87.0°E to 98.0°E).
+const NER_BOUNDS = [
+  [20.5, 87.0], // South-West corner (Bengal / Bay of Bengal buffer)
+  [30.5, 98.0]  // North-East corner (Upper Arunachal frontier)
+];
+
+// NER Regional Center: centered across Assam, Meghalaya, Manipur, and Nagaland corridors
+const NER_CENTER = [25.80, 92.80];
 const DEFAULT_ZOOM = 7;
+const MIN_ZOOM = 6;  // Prevents zooming out to entire continent/world
+const MAX_ZOOM = 16; // Detailed road and chokepoint level zoom
 
 // Hub Coordinates
 const NER_HUBS = [
@@ -81,6 +91,10 @@ export default function NERMap({
         <MapContainer
           center={NER_CENTER}
           zoom={DEFAULT_ZOOM}
+          minZoom={MIN_ZOOM}
+          maxZoom={MAX_ZOOM}
+          maxBounds={NER_BOUNDS}
+          maxBoundsViscosity={1.0}
           scrollWheelZoom={true}
           style={{ width: '100%', height: '100%' }}
         >

@@ -9,37 +9,42 @@ import {
   BarChart2, 
   Settings, 
   LogOut,
+  LogIn,
   Mountain
 } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function Sidebar({ 
   activePage, 
   setActivePage, 
-  activeAlertCount = 0 
+  activeAlertCount = 20 
 }) {
+  const { isAuthenticated, signOut, openAuthModal } = useAuth();
   const mainNavItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'route-intel', label: 'Route Intelligence', icon: Compass },
     { id: 'live-map', label: 'Live Map', icon: MapIcon },
     { id: 'vehicles', label: 'Vehicles', icon: Truck },
-    { id: 'alerts', label: 'Alerts', icon: Bell, badge: activeAlertCount > 0 ? activeAlertCount : null },
+    { id: 'alerts', label: 'Alerts', icon: Bell, badge: activeAlertCount || 20 },
     { id: 'field-reports', label: 'Field Reports', icon: FileSpreadsheet },
     { id: 'authority', label: 'Analytics', icon: BarChart2 }
   ];
 
   return (
     <aside className="app-sidebar">
-      {/* Sidebar Brand Header */}
-      <div className="sidebar-brand" style={{ padding: '0.75rem 1rem 0.5rem 1rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <img 
-          src={`${import.meta.env.BASE_URL}aapdassetu-logo.png`} 
-          alt="AapdaSetu Logo" 
-          style={{ maxHeight: '100px', width: 'auto', objectFit: 'contain' }}
-        />
-      </div>
+      {/* Top Section: Brand + Primary Navigation Menu */}
+      <div className="sidebar-top">
+        {/* Sidebar Brand Header */}
+        <div className="sidebar-brand">
+          <img 
+            src={`${import.meta.env.BASE_URL}aapdassetu-logo.png`} 
+            alt="AapdaSetu Logo" 
+            className="sidebar-logo"
+          />
+        </div>
 
-      {/* Primary Navigation Menu */}
-      <nav className="sidebar-nav">
+        {/* Primary Navigation Menu */}
+        <nav className="sidebar-nav">
         {mainNavItems.map(item => {
           const Icon = item.icon;
           const isActive = activePage === item.id;
@@ -72,6 +77,7 @@ export default function Sidebar({
           );
         })}
       </nav>
+    </div>
 
       {/* Bottom Utility Menu */}
       <div className="sidebar-bottom">
@@ -83,14 +89,28 @@ export default function Sidebar({
           <Settings size={17} strokeWidth={1.8} />
           <span>Settings</span>
         </button>
-        <button 
-          className="sidebar-item" 
-          onClick={() => setActivePage('dashboard')}
-          title="Logout / Reset"
-        >
-          <LogOut size={17} strokeWidth={1.8} />
-          <span>Logout</span>
-        </button>
+
+        {isAuthenticated ? (
+          <button 
+            className="sidebar-item" 
+            onClick={() => signOut()}
+            title="Official Sign Out"
+            id="sidebar-btn-logout"
+          >
+            <LogOut size={17} strokeWidth={1.8} />
+            <span>Sign Out</span>
+          </button>
+        ) : (
+          <button 
+            className="sidebar-item" 
+            onClick={() => openAuthModal('login')}
+            title="Official Sign In"
+            id="sidebar-btn-login"
+          >
+            <LogIn size={17} strokeWidth={1.8} />
+            <span>Official Login</span>
+          </button>
+        )}
 
         {/* Promotional Regional Lifeline Card */}
         <div 
