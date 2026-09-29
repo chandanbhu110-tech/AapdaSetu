@@ -1,12 +1,24 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { supabase, isSupabaseConfigured, getProfile, upsertProfile } from '../services/supabaseClient';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback
+} from 'react';
+
+import {
+  supabase,
+  isSupabaseConfigured,
+  getProfile,
+  upsertProfile
+} from '../services/supabaseClient';
 
 const AuthContext = createContext(null);
 
 // Official verification code for authorized personnel onboarding
 export const OFFICIAL_ACCESS_CODE = 'NER-OFFICIAL-2025';
 
-// Pre-configured Authority Profile (Can verify field reports & command actions)
+// Demo Authority Profile
 export const DEMO_AUTHORITY = {
   id: 'demo-authority-001',
   email: 'director.sdma@aapdassetu.gov.in',
@@ -15,10 +27,11 @@ export const DEMO_AUTHORITY = {
   agency: 'State Disaster Management Authority (SDMA)',
   designation: 'Disaster Authority Director',
   official_id: 'SDMA-DIR-101',
+  verification_status: 'verified',
   isDemo: true
 };
 
-// Pre-configured Field Official Profile (Can report incidents, CANNOT verify)
+// Demo Field Official Profile
 export const DEMO_FIELD_OFFICIAL = {
   id: 'demo-field-002',
   email: 'officer.das@aapdassetu.gov.in',
@@ -27,6 +40,7 @@ export const DEMO_FIELD_OFFICIAL = {
   agency: 'Highway Patrol Ground Unit',
   designation: 'Field Patrol Officer',
   official_id: 'HP-PATROL-402',
+  verification_status: 'verified',
   isDemo: true
 };
 
@@ -39,7 +53,7 @@ export function AuthProvider({ children }) {
 
   // Modal UI state
   const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [authModalMode, setAuthModalMode] = useState('login'); // 'login' | 'register'
+  const [authModalMode, setAuthModalMode] = useState('login');
 
   const openAuthModal = useCallback((mode = 'login') => {
     setAuthError(null);
@@ -52,166 +66,418 @@ export function AuthProvider({ children }) {
     setAuthError(null);
   }, []);
 
-  // Helper to construct normalized official profile
+  // ---------------------------------------------------------
+  // Get profile from Supabase
+  // ---------------------------------------------------------
   const extractProfile = useCallback(async (authUser) => {
     if (!authUser) return null;
 
-    // First try fetching custom profile row from Supabase profiles table
     let dbProfile = null;
+
     if (isSupabaseConfigured && supabase) {
-      dbProfile = await getProfile(authUser.id);
+      try {
+        dbProfile = await getProfile(authUser.id);
+      } catch (error) {
+        console.warn('Unable to fetch profile:', error);
+      }
     }
 
     const metadata = authUser.user_metadata || {};
+
     return {
       id: authUser.id,
       email: authUser.email,
-      full_name: dbProfile?.full_name || metadata.full_name || 'Emergency Official',
-      role: dbProfile?.role || metadata.role || 'official',
-      agency: dbProfile?.agency || metadata.agency || 'NER Logistics Command',
-      designation: dbProfile?.designation || metadata.designation || 'Operations Officer',
-      official_id: dbProfile?.official_id || metadata.official_id || `OFF-${authUser.id.slice(0, 6)}`,
+
+      full_name:
+        dbProfile?.full_name ||
+        metadata.full_name ||
+        'Emergency Official',
+
+      // IMPORTANT:
+      // Never trust role from frontend metadata.
+      // Prefer the role stored in the database.
+      role:
+        dbProfile?.role ||
+        'field_officer',
+
+      agency:
+        dbProfile?.agency ||
+        metadata.agency ||
+        'NER Logistics Command',
+
+      designation:
+        dbProfile?.designation ||
+        metadata.designation ||
+        'Field Officer',
+
+      official_id:
+        dbProfile?.official_id ||
+        metadata.official_id ||
+        `OFF-${authUser.id.slice(0, 6)}`,
+
+      verification_status:
+        dbProfile?.verification_status ||
+        'pending',
+
+      verified_by:
+        dbProfile?.verified_by ||
+        null,
+
+      verified_at:
+        dbProfile?.verified_at ||
+        null,
+
+      rejection_reason:
+        dbProfile?.rejection_reason ||
+        null,
+
+      state:
+        dbProfile?.state ||
+        metadata.state ||
+        null,
+
+      district:
+        dbProfile?.district ||
+        metadata.district ||
+        null,
+
       isDemo: false
     };
   }, []);
 
-  // Initialize auth session on mount
+  // ---------------------------------------------------------
+  // Check whether real account is allowed to enter
+  // ---------------------------------------------------------
+  const handleVerificationStatus = useCallback(
+    async (profile) => {
+      if (!profile) return false;
+
+      // Demo accounts are always allowed
+      if (profile.isDemo) {
+        return true;
+      }
+
+      // VERIFIED
+      if (profile.verification_status === 'verified') {
+        return true;
+      }
+
+      // PENDING
+      if (profile.verification_status === 'pending') {
+        const message =
+          'Your official account is awaiting verification by an authorized officer.';
+
+        setAuthError(message);
+
+        if (isSupabaseConfigured && supabase) {
+          try {
+            await supabase.auth.signOut();
+          } catch (error) {
+            console.warn('Error signing out pending user:', error);
+          }
+        }
+
+        setUser(null);
+        setSession(null);
+        setOfficialProfile(null);
+
+        return false;
+      }
+
+      // REJECTED
+      if (profile.verification_status === 'rejected') {
+        const reason = profile.rejection_reason
+          ? ` Reason: ${profile.rejection_reason}`
+          : '';
+
+        const message =
+          `Your official account has been rejected.${reason}`;
+
+        setAuthError(message);
+
+        if (isSupabaseConfigured && supabase) {
+          try {
+            await supabase.auth.signOut();
+          } catch (error) {
+            console.warn('Error signing out rejected user:', error);
+          }
+        }
+
+        setUser(null);
+        setSession(null);
+        setOfficialProfile(null);
+
+        return false;
+      }
+
+      // Unknown status
+      const message =
+        'Your account verification status is not valid. Please contact the administrator.';
+
+      setAuthError(message);
+
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await supabase.auth.signOut();
+        } catch (error) {
+          console.warn('Error signing out invalid user:', error);
+        }
+      }
+
+      setUser(null);
+      setSession(null);
+      setOfficialProfile(null);
+
+      return false;
+    },
+    []
+  );
+
+  // ---------------------------------------------------------
+  // Initialize authentication
+  // ---------------------------------------------------------
   useEffect(() => {
     let mounted = true;
 
     async function initAuth() {
       setIsLoading(true);
 
-      // 1. Check active Supabase session if configured
+      // Real Supabase session
       if (isSupabaseConfigured && supabase) {
         try {
-          const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+          const {
+            data: { session: currentSession },
+            error
+          } = await supabase.auth.getSession();
+
           if (error) {
-            console.warn('Supabase getSession error:', error.message);
+            console.warn(
+              'Supabase getSession error:',
+              error.message
+            );
           }
 
           if (mounted && currentSession?.user) {
-            setSession(currentSession);
-            setUser(currentSession.user);
-            const prof = await extractProfile(currentSession.user);
-            if (mounted) setOfficialProfile(prof);
+            const prof = await extractProfile(
+              currentSession.user
+            );
+
+            if (!mounted) return;
+
+            const allowed =
+              await handleVerificationStatus(prof);
+
+            if (allowed) {
+              setSession(currentSession);
+              setUser(currentSession.user);
+              setOfficialProfile(prof);
+            }
+
             setIsLoading(false);
             return;
           }
-        } catch (err) {
-          console.warn('Error reading Supabase session:', err);
+        } catch (error) {
+          console.warn(
+            'Error reading Supabase session:',
+            error
+          );
         }
       }
 
-      // 2. Check local storage for persistent demo session
-      const savedDemo = localStorage.getItem('aapdassetu_demo_official');
-      if (savedDemo) {
+      // Demo session only
+      const savedDemo = localStorage.getItem(
+        'aapdassetu_demo_official'
+      );
+
+      if (savedDemo && mounted) {
         try {
           const parsed = JSON.parse(savedDemo);
-          if (mounted) {
-            setUser({ id: parsed.id, email: parsed.email, user_metadata: parsed });
+
+          if (parsed?.isDemo) {
+            setUser({
+              id: parsed.id,
+              email: parsed.email,
+              user_metadata: parsed
+            });
+
             setOfficialProfile(parsed);
+
+            setSession({
+              access_token: 'demo-token',
+              user: parsed
+            });
+          } else {
+            localStorage.removeItem(
+              'aapdassetu_demo_official'
+            );
           }
-        } catch (_e) {
-          localStorage.removeItem('aapdassetu_demo_official');
+        } catch (error) {
+          console.warn(
+            'Invalid demo session:',
+            error
+          );
+
+          localStorage.removeItem(
+            'aapdassetu_demo_official'
+          );
         }
       }
 
-      if (mounted) setIsLoading(false);
+      if (mounted) {
+        setIsLoading(false);
+      }
     }
 
     initAuth();
 
-    // Listen to Supabase auth state changes
+    // -------------------------------------------------------
+    // Listen to Supabase auth changes
+    // -------------------------------------------------------
     let authListener = null;
-    if (isSupabaseConfigured && supabase) {
-      const { data } = supabase.auth.onAuthStateChange(async (event, newSession) => {
-        if (!mounted) return;
-        setSession(newSession);
-        setUser(newSession?.user || null);
 
-        if (newSession?.user) {
-          const prof = await extractProfile(newSession.user);
-          if (mounted) setOfficialProfile(prof);
-          localStorage.removeItem('aapdassetu_demo_official');
-        } else if (!localStorage.getItem('aapdassetu_demo_official')) {
-          if (mounted) setOfficialProfile(null);
-        }
-      });
+    if (isSupabaseConfigured && supabase) {
+      const { data } =
+        supabase.auth.onAuthStateChange(
+          async (event, newSession) => {
+            if (!mounted) return;
+
+            if (!newSession?.user) {
+              setUser(null);
+              setSession(null);
+
+              if (
+                !localStorage.getItem(
+                  'aapdassetu_demo_official'
+                )
+              ) {
+                setOfficialProfile(null);
+              }
+
+              return;
+            }
+
+            const prof = await extractProfile(
+              newSession.user
+            );
+
+            if (!mounted) return;
+
+            const allowed =
+              await handleVerificationStatus(prof);
+
+            if (allowed) {
+              setSession(newSession);
+              setUser(newSession.user);
+              setOfficialProfile(prof);
+
+              localStorage.removeItem(
+                'aapdassetu_demo_official'
+              );
+            }
+          }
+        );
+
       authListener = data?.subscription;
     }
 
     return () => {
       mounted = false;
-      if (authListener) authListener.unsubscribe();
+
+      if (authListener) {
+        authListener.unsubscribe();
+      }
     };
-  }, [extractProfile]);
+  }, [extractProfile, handleVerificationStatus]);
 
-  /**
-   * Official Sign In via Supabase or Local Registered Credentials
-   */
-  const signInWithEmail = async (email, password) => {
+  // ---------------------------------------------------------
+  // LOGIN
+  // ---------------------------------------------------------
+  const signInWithEmail = async (
+    email,
+    password
+  ) => {
     setAuthError(null);
-    const trimmedEmail = (email || '').trim().toLowerCase();
 
-    // 1. Check if user exists in local registered accounts
-    const localAccounts = (() => {
-      try {
-        return JSON.parse(localStorage.getItem('aapdassetu_registered_officials') || '[]');
-      } catch {
-        return [];
-      }
-    })();
-    const matchingLocal = localAccounts.find(u => u.email?.toLowerCase() === trimmedEmail);
+    const trimmedEmail =
+      (email || '').trim().toLowerCase();
 
-    if (matchingLocal) {
-      if (matchingLocal.password && matchingLocal.password !== password) {
-        const err = new Error('Invalid email or password.');
-        setAuthError(err.message);
-        throw err;
-      }
-      setUser({ id: matchingLocal.id, email: trimmedEmail, user_metadata: matchingLocal });
-      setOfficialProfile(matchingLocal);
-      setSession({ access_token: 'local-token', user: matchingLocal });
-      localStorage.setItem('aapdassetu_demo_official', JSON.stringify(matchingLocal));
-      closeAuthModal();
-      return { user: matchingLocal, session: { access_token: 'local-token' } };
-    }
-
-    // 2. If Supabase is not configured and no local account matched
     if (!isSupabaseConfigured || !supabase) {
-      const err = new Error('Official credentials not recognized. Please register an official account or use One-Click Demo Roles.');
-      setAuthError(err.message);
-      throw err;
-    }
+      const error = new Error(
+        'Authentication service is currently unavailable.'
+      );
 
-    // 3. Attempt Supabase Auth Sign In
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: trimmedEmail,
-      password
-    });
-
-    if (error) {
       setAuthError(error.message);
       throw error;
     }
 
-    if (data?.user) {
+    try {
+      const {
+        data,
+        error
+      } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password
+      });
+
+      if (error) {
+        setAuthError(error.message);
+        throw error;
+      }
+
+      if (!data?.user) {
+        const error = new Error(
+          'Unable to sign in.'
+        );
+
+        setAuthError(error.message);
+        throw error;
+      }
+
+      const prof = await extractProfile(
+        data.user
+      );
+
+      const allowed =
+        await handleVerificationStatus(prof);
+
+      if (!allowed) {
+        throw new Error(
+          'Your account is not verified.'
+        );
+      }
+
       setUser(data.user);
       setSession(data.session);
-      const prof = await extractProfile(data.user);
       setOfficialProfile(prof);
-      localStorage.removeItem('aapdassetu_demo_official');
-      closeAuthModal();
-      return data;
-    }
 
-    return data;
+      localStorage.removeItem(
+        'aapdassetu_demo_official'
+      );
+
+      closeAuthModal();
+
+      return {
+        ...data,
+        resolvedProfile: prof
+      };
+    } catch (error) {
+      if (
+        error?.message !==
+        'Your account is not verified.'
+      ) {
+        setAuthError(
+          error?.message ||
+          'Unable to sign in.'
+        );
+      }
+
+      throw error;
+    }
   };
 
-  /**
-   * Official Account Registration (Restricted to Officials with Passcode)
-   */
+  // ---------------------------------------------------------
+  // SIGN UP OFFICIAL
+  // ---------------------------------------------------------
   const signUpOfficial = async ({
     email,
     password,
@@ -220,220 +486,337 @@ export function AuthProvider({ children }) {
     designation,
     officialId,
     accessCode,
-    role = 'authority'
+    role = 'field_officer',
+    state = '',
+    district = ''
   }) => {
     setAuthError(null);
 
-    // Enforce official verification passkey
-    if (!accessCode || accessCode.trim().toUpperCase() !== OFFICIAL_ACCESS_CODE) {
-      const err = new Error(`Invalid Official Authorization Passcode. Please enter "${OFFICIAL_ACCESS_CODE}" to register.`);
-      setAuthError(err.message);
-      throw err;
+    // -----------------------------------------------
+    // Official authorization code
+    // -----------------------------------------------
+    if (
+      !accessCode ||
+      accessCode.trim().toUpperCase() !==
+        OFFICIAL_ACCESS_CODE
+    ) {
+      const error = new Error(
+        `Invalid Official Authorization Passcode. Please enter "${OFFICIAL_ACCESS_CODE}" to register.`
+      );
+
+      setAuthError(error.message);
+      throw error;
     }
 
-    const trimmedEmail = (email || '').trim().toLowerCase();
-    const finalFullName = (fullName || '').trim();
-    const finalRole = role || 'authority';
-    const finalAgency = agency || 'NER Emergency Logistics Unit';
-    const finalDesignation = (designation || '').trim() || (finalRole === 'authority' ? 'Disaster Authority Officer' : 'Field Patrol Officer');
-    const finalOfficialId = (officialId || '').trim() || `OFF-${Date.now().toString().slice(-6)}`;
+    if (!isSupabaseConfigured || !supabase) {
+      const error = new Error(
+        'Authentication service is currently unavailable. Please configure Supabase before registering an official account.'
+      );
 
-    // Standardized Official Profile
-    const localOfficialUser = {
-      id: `off-${Date.now()}`,
-      email: trimmedEmail,
-      full_name: finalFullName,
+      setAuthError(error.message);
+      throw error;
+    }
+
+    const trimmedEmail =
+      (email || '').trim().toLowerCase();
+
+    const finalFullName =
+      (fullName || '').trim();
+
+    const finalAgency =
+      (agency || '').trim() ||
+      'NER Emergency Logistics Unit';
+
+    const finalDesignation =
+      (designation || '').trim() ||
+      'Field Officer';
+
+    const finalOfficialId =
+      (officialId || '').trim() ||
+      `OFF-${Date.now()
+        .toString()
+        .slice(-6)}`;
+
+    const finalState =
+      (state || '').trim();
+
+    const finalDistrict =
+      (district || '').trim();
+
+    // IMPORTANT:
+    // New public registrations are ALWAYS field_officer.
+    // They cannot choose admin/authority from frontend.
+    const finalRole = 'field_officer';
+
+    const metadata = {
       role: finalRole,
+      full_name: finalFullName,
       agency: finalAgency,
       designation: finalDesignation,
       official_id: finalOfficialId,
-      isDemo: false,
-      isLocalRegistered: true,
-      created_at: new Date().toISOString()
+      state: finalState,
+      district: finalDistrict
     };
 
-    // Helper to persist in local registered officials pool
-    const saveToLocalStorage = (acc, plainPassword) => {
-      try {
-        const existing = JSON.parse(localStorage.getItem('aapdassetu_registered_officials') || '[]');
-        const updated = existing.filter(u => u.email?.toLowerCase() !== trimmedEmail);
-        updated.push({ ...acc, password: plainPassword });
-        localStorage.setItem('aapdassetu_registered_officials', JSON.stringify(updated));
-      } catch (e) {
-        console.warn('Error saving local registered official:', e);
+    try {
+      const {
+        data,
+        error
+      } = await supabase.auth.signUp({
+        email: trimmedEmail,
+        password,
+
+        options: {
+          data: metadata
+        }
+      });
+
+      if (error) {
+        setAuthError(error.message);
+        throw error;
       }
-    };
 
-    // Case A: Supabase is Configured -> Attempt cloud registration
-    if (isSupabaseConfigured && supabase) {
+      if (!data?.user) {
+        const error = new Error(
+          'Unable to create official account.'
+        );
+
+        setAuthError(error.message);
+        throw error;
+      }
+
+      // -----------------------------------------------
+      // Profile is normally created by your Supabase
+      // handle_new_user trigger.
+      // We only upsert safe fields here.
+      // -----------------------------------------------
       try {
-        const metadata = {
-          role: finalRole,
+        await upsertProfile({
+          id: data.user.id,
+          email: trimmedEmail,
           full_name: finalFullName,
+          role: 'field_officer',
           agency: finalAgency,
           designation: finalDesignation,
-          official_id: finalOfficialId
-        };
-
-        const { data, error } = await supabase.auth.signUp({
-          email: trimmedEmail,
-          password,
-          options: {
-            data: metadata
-          }
+          official_id: finalOfficialId,
+          state: finalState,
+          district: finalDistrict
         });
-
-        if (error) {
-          console.warn('Supabase remote sign up error:', error.message);
-          // If strictly invalid email format, alert the user
-          if (error.status === 400 && error.code === 'email_address_invalid') {
-            setAuthError(error.message);
-            throw error;
-          }
-          // For other issues (network, rate-limiting), fall back to local registration seamlessly
-          saveToLocalStorage(localOfficialUser, password);
-          setUser({ id: localOfficialUser.id, email: trimmedEmail, user_metadata: localOfficialUser });
-          setOfficialProfile(localOfficialUser);
-          setSession({ access_token: 'local-session', user: localOfficialUser });
-          localStorage.setItem('aapdassetu_demo_official', JSON.stringify(localOfficialUser));
-          return { user: localOfficialUser, session: { access_token: 'local-session' }, isLocalFallback: true };
-        }
-
-        // Successfully created user in Supabase
-        if (data?.user) {
-          setUser(data.user);
-          setSession(data.session);
-
-          // Save local backup for seamless sign-in
-          saveToLocalStorage({ ...localOfficialUser, id: data.user.id }, password);
-
-          // Attempt upsert in profiles table
-          await upsertProfile({
-            id: data.user.id,
-            email: trimmedEmail,
-            full_name: metadata.full_name,
-            role: metadata.role,
-            agency: metadata.agency,
-            designation: metadata.designation,
-            official_id: metadata.official_id
-          });
-
-          const prof = await extractProfile(data.user);
-          const resolvedProf = {
-            ...localOfficialUser,
-            id: data.user.id,
-            ...prof
-          };
-          setOfficialProfile(resolvedProf);
-          localStorage.setItem('aapdassetu_demo_official', JSON.stringify(resolvedProf));
-          return {
-            ...data,
-            resolvedProfile: resolvedProf,
-            needsEmailConfirm: !data.session
-          };
-        }
-      } catch (err) {
-        if (err.code === 'email_address_invalid') {
-          throw err;
-        }
-        console.warn('Supabase sign up exception, falling back to local account:', err);
-        saveToLocalStorage(localOfficialUser, password);
-        setUser({ id: localOfficialUser.id, email: trimmedEmail, user_metadata: localOfficialUser });
-        setOfficialProfile(localOfficialUser);
-        setSession({ access_token: 'local-session', user: localOfficialUser });
-        localStorage.setItem('aapdassetu_demo_official', JSON.stringify(localOfficialUser));
-        return { user: localOfficialUser, session: { access_token: 'local-session' }, isLocalFallback: true };
+      } catch (profileError) {
+        console.warn(
+          'Profile upsert warning:',
+          profileError
+        );
       }
+
+      const prof =
+        await extractProfile(data.user);
+
+      // -----------------------------------------------
+      // New accounts MUST remain pending.
+      // Never automatically log them into dashboard.
+      // -----------------------------------------------
+      if (data.session) {
+        try {
+          await supabase.auth.signOut();
+        } catch (signOutError) {
+          console.warn(
+            'Unable to sign out pending account:',
+            signOutError
+          );
+        }
+      }
+
+      setUser(null);
+      setSession(null);
+      setOfficialProfile(null);
+
+      const pendingProfile = {
+        ...prof,
+        role: 'field_officer',
+        verification_status: 'pending'
+      };
+
+      return {
+        ...data,
+
+        resolvedProfile:
+          pendingProfile,
+
+        needsVerification: true,
+
+        needsEmailConfirm:
+          !data.session,
+
+        message:
+          'Registration successful. Your account is pending verification by an authorized officer.'
+      };
+    } catch (error) {
+      setAuthError(
+        error?.message ||
+        'Unable to register official account.'
+      );
+
+      throw error;
     }
-
-    // Case B: Supabase is NOT configured (e.g. GitHub Pages without secrets)
-    // Instant local registration so the user can immediately access command features
-    saveToLocalStorage(localOfficialUser, password);
-    setUser({ id: localOfficialUser.id, email: trimmedEmail, user_metadata: localOfficialUser });
-    setOfficialProfile(localOfficialUser);
-    setSession({ access_token: 'local-session', user: localOfficialUser });
-    localStorage.setItem('aapdassetu_demo_official', JSON.stringify(localOfficialUser));
-
-    return {
-      user: localOfficialUser,
-      session: { access_token: 'local-session' },
-      isLocalRegistered: true
-    };
   };
 
-  /**
-   * Sign Out
-   */
+  // ---------------------------------------------------------
+  // SIGN OUT
+  // ---------------------------------------------------------
   const signOut = async () => {
     try {
-      if (isSupabaseConfigured && supabase) {
+      if (
+        isSupabaseConfigured &&
+        supabase
+      ) {
         await supabase.auth.signOut();
       }
-    } catch (err) {
-      console.warn('Sign out error:', err);
+    } catch (error) {
+      console.warn(
+        'Sign out error:',
+        error
+      );
     } finally {
       setUser(null);
       setSession(null);
       setOfficialProfile(null);
-      localStorage.removeItem('aapdassetu_demo_official');
+
+      localStorage.removeItem(
+        'aapdassetu_demo_official'
+      );
     }
   };
 
-  /**
-   * Instant One-Click Demo Login (Authority vs Field Official)
-   */
-  const demoLogin = (roleOrProfile = 'authority') => {
+  // ---------------------------------------------------------
+  // DEMO LOGIN
+  // ---------------------------------------------------------
+  const demoLogin = (
+    roleOrProfile = 'authority'
+  ) => {
     let demoProf;
-    if (typeof roleOrProfile === 'string') {
-      demoProf = roleOrProfile === 'field_official' ? DEMO_FIELD_OFFICIAL : DEMO_AUTHORITY;
-    } else if (roleOrProfile && typeof roleOrProfile === 'object') {
-      demoProf = { ...DEMO_AUTHORITY, ...roleOrProfile };
+
+    if (
+      typeof roleOrProfile === 'string'
+    ) {
+      demoProf =
+        roleOrProfile === 'field_official'
+          ? DEMO_FIELD_OFFICIAL
+          : DEMO_AUTHORITY;
+    } else if (
+      roleOrProfile &&
+      typeof roleOrProfile === 'object'
+    ) {
+      demoProf = {
+        ...DEMO_AUTHORITY,
+        ...roleOrProfile,
+        verification_status: 'verified',
+        isDemo: true
+      };
     } else {
       demoProf = DEMO_AUTHORITY;
     }
 
-    setUser({ id: demoProf.id, email: demoProf.email, user_metadata: demoProf });
+    setUser({
+      id: demoProf.id,
+      email: demoProf.email,
+      user_metadata: demoProf
+    });
+
     setOfficialProfile(demoProf);
-    setSession({ access_token: 'demo-token', user: demoProf });
-    localStorage.setItem('aapdassetu_demo_official', JSON.stringify(demoProf));
+
+    setSession({
+      access_token: 'demo-token',
+      user: demoProf
+    });
+
+    localStorage.setItem(
+      'aapdassetu_demo_official',
+      JSON.stringify(demoProf)
+    );
+
     closeAuthModal();
   };
 
-  const isAuthenticated = Boolean(user || officialProfile);
-  const isOfficial = Boolean(
-    officialProfile?.role === 'official' || 
-    officialProfile?.role === 'field_official' ||
-    officialProfile?.role === 'authority' ||
-    officialProfile?.role === 'admin' ||
-    user?.user_metadata?.role
-  );
-  const isAuthority = Boolean(
-    officialProfile?.role === 'authority' || 
-    officialProfile?.role === 'admin' ||
-    user?.user_metadata?.role === 'authority' ||
-    user?.user_metadata?.role === 'admin'
-  );
+  // ---------------------------------------------------------
+  // AUTH STATUS
+  // ---------------------------------------------------------
+  const isAuthenticated =
+    Boolean(
+      user &&
+      officialProfile
+    );
 
+  const isOfficial =
+    Boolean(
+      officialProfile?.role === 'official' ||
+      officialProfile?.role === 'field_officer' ||
+      officialProfile?.role === 'field_official' ||
+      officialProfile?.role === 'authority' ||
+      officialProfile?.role === 'admin'
+    );
+
+  const isAuthority =
+    Boolean(
+      officialProfile?.role === 'authority' ||
+      officialProfile?.role === 'admin'
+    );
+
+  const isAdmin =
+    officialProfile?.role === 'admin';
+
+  const isVerified =
+    officialProfile?.isDemo ||
+    officialProfile?.verification_status ===
+      'verified';
+
+  const isPending =
+    !officialProfile?.isDemo &&
+    officialProfile?.verification_status ===
+      'pending';
+
+  const isRejected =
+    !officialProfile?.isDemo &&
+    officialProfile?.verification_status ===
+      'rejected';
+
+  // ---------------------------------------------------------
+  // CONTEXT
+  // ---------------------------------------------------------
   return (
     <AuthContext.Provider
       value={{
         user,
         session,
+
         officialProfile,
+
         isAuthenticated,
         isOfficial,
         isAuthority,
+        isAdmin,
+        isVerified,
+        isPending,
+        isRejected,
+
         isLoading,
+
         authError,
         setAuthError,
+
         authModalOpen,
         authModalMode,
+
         openAuthModal,
         closeAuthModal,
+
         signInWithEmail,
         signUpOfficial,
+        signUpNormalUser,
         signOut,
+
         demoLogin,
+
         isSupabaseConfigured
       }}
     >
@@ -442,10 +825,99 @@ export function AuthProvider({ children }) {
   );
 }
 
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+const signUpNormalUser = async ({
+  email,
+  password,
+  fullName
+}) => {
+  setAuthError(null);
+
+  const trimmedEmail = (email || '').trim().toLowerCase();
+  const trimmedName = (fullName || '').trim();
+
+  if (!trimmedEmail || !password || !trimmedName) {
+    const error = new Error(
+      'Name, email and password are required.'
+    );
+
+    setAuthError(error.message);
+    throw error;
   }
+
+  if (!isSupabaseConfigured || !supabase) {
+    const error = new Error(
+      'Authentication service is not configured.'
+    );
+
+    setAuthError(error.message);
+    throw error;
+  }
+
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email: trimmedEmail,
+      password,
+      options: {
+        data: {
+          full_name: trimmedName,
+          role: 'public_user'
+        }
+      }
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    if (data?.user) {
+      setUser(data.user);
+      setSession(data.session || null);
+
+      const profile = {
+        id: data.user.id,
+        email: trimmedEmail,
+        full_name: trimmedName,
+        role: 'public_user'
+      };
+
+      setOfficialProfile(profile);
+
+      return {
+        ...data,
+        profile,
+        needsEmailConfirm: !data.session
+      };
+    }
+
+    return data;
+
+  } catch (error) {
+    console.error(
+      'Normal user registration error:',
+      error
+    );
+
+    setAuthError(
+      error.message ||
+      'Unable to create account.'
+    );
+
+    throw error;
+  }
+};
+
+// ---------------------------------------------------------
+// useAuth Hook
+// ---------------------------------------------------------
+export function useAuth() {
+  const context =
+    useContext(AuthContext);
+
+  if (!context) {
+    throw new Error(
+      'useAuth must be used within an AuthProvider'
+    );
+  }
+
   return context;
 }
